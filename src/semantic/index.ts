@@ -4,6 +4,7 @@ import {
   ComponentObservationSchema,
   type ComponentObservation
 } from "../observation/index.js";
+import { SCHEMA_VERSION } from "../schema-version.js";
 
 export { type ComponentObservation } from "../observation/index.js";
 
@@ -82,12 +83,8 @@ export interface SemanticAdjudicator {
   }): Promise<unknown>;
 }
 
-export interface SemanticDecision extends SemanticProposal {
-  status: "draft" | "needs_review";
-}
-
 export const SemanticDraftSchema = z.object({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(SCHEMA_VERSION),
   sourceId: z.string().min(1),
   name: z.string().min(1),
   proposals: z.object({
@@ -144,7 +141,7 @@ export async function analyzeComponent(input: {
     : [...structural.evidence, ...visual.evidence];
 
   return {
-    schemaVersion: "1.0.0",
+    schemaVersion: SCHEMA_VERSION,
     sourceId: observation.root.sourceId,
     name: observation.root.name,
     proposals: { structural, visual },

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { SCHEMA_VERSION } from "../schema-version.js";
+
 export const BoundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -16,58 +18,39 @@ export const ComponentRefSchema = z.object({
   isNested: z.boolean().optional()
 });
 
-export interface ObservedNode {
-  sourceId: string;
-  name: string;
-  nodeType: string;
-  visible: boolean;
-  opacity?: number | undefined;
-  componentRef?: z.infer<typeof ComponentRefSchema> | undefined;
-  bounds?: z.infer<typeof BoundsSchema> | undefined;
-  text?: {
-    characters: string;
-    fontFamily?: string | undefined;
-    fontSize?: number | undefined;
-  } | undefined;
-  style?: {
-    backgroundColor?: string | undefined;
-    backgroundOpacity?: number | undefined;
-    fillType?: string | undefined;
-  } | undefined;
-  imageBase64?: string | undefined;
-  children: ObservedNode[];
-}
+export const ObservedNodeSchema = z.object({
+  sourceId: z.string().min(1),
+  name: z.string().min(1),
+  nodeType: z.string().min(1),
+  visible: z.boolean(),
+  opacity: z.number().min(0).max(1).optional(),
+  componentRef: ComponentRefSchema.optional(),
+  bounds: BoundsSchema.optional(),
+  text: z
+    .object({
+      characters: z.string(),
+      fontFamily: z.string().optional(),
+      fontStyle: z.string().optional(),
+      fontSize: z.number().positive().optional()
+    })
+    .optional(),
+  style: z
+    .object({
+      backgroundColor: z.string().optional(),
+      backgroundOpacity: z.number().min(0).max(1).optional(),
+      fillType: z.string().optional()
+    })
+    .optional(),
+  imageBase64: z.string().optional(),
+  get children() {
+    return z.array(ObservedNodeSchema);
+  }
+});
 
-export const ObservedNodeSchema: z.ZodType<ObservedNode> = z.lazy(() =>
-  z.object({
-    sourceId: z.string().min(1),
-    name: z.string().min(1),
-    nodeType: z.string().min(1),
-    visible: z.boolean(),
-    opacity: z.number().min(0).max(1).optional(),
-    componentRef: ComponentRefSchema.optional(),
-    bounds: BoundsSchema.optional(),
-    text: z
-      .object({
-        characters: z.string(),
-        fontFamily: z.string().optional(),
-        fontSize: z.number().positive().optional()
-      })
-      .optional(),
-    style: z
-      .object({
-        backgroundColor: z.string().optional(),
-        backgroundOpacity: z.number().min(0).max(1).optional(),
-        fillType: z.string().optional()
-      })
-      .optional(),
-    imageBase64: z.string().optional(),
-    children: z.array(ObservedNodeSchema)
-  })
-);
+export type ObservedNode = z.infer<typeof ObservedNodeSchema>;
 
 export const ComponentObservationSchema = z.object({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(SCHEMA_VERSION),
   source: z.object({
     kind: z.literal("unity-figma-bridge"),
     documentName: z.string().min(1),
@@ -79,7 +62,7 @@ export const ComponentObservationSchema = z.object({
 export type ComponentObservation = z.infer<typeof ComponentObservationSchema>;
 
 export const ObservationDocumentSchema = z.object({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(SCHEMA_VERSION),
   observations: z.array(ComponentObservationSchema)
 });
 

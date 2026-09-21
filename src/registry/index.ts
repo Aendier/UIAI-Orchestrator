@@ -7,9 +7,12 @@ import {
   SemanticTypeSchema,
   SemanticDraftSchema
 } from "../semantic/index.js";
+import { SCHEMA_VERSION } from "../schema-version.js";
+
+const SEARCH_MATCH_THRESHOLD = 0.6;
 
 export const ApprovedComponentSchema = z.object({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(SCHEMA_VERSION),
   id: z.string().min(1),
   sourceId: z.string().min(1),
   name: z.string().min(1),
@@ -27,7 +30,7 @@ export const ApprovedComponentSchema = z.object({
 export type ApprovedComponent = z.infer<typeof ApprovedComponentSchema>;
 
 export const ComponentRegistrySchema = z.object({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(SCHEMA_VERSION),
   components: z.array(ApprovedComponentSchema)
 });
 
@@ -77,7 +80,7 @@ export function approveDraft(
   const draft = SemanticDraftSchema.parse(draftInput);
   const registry = ComponentRegistrySchema.parse(registryInput);
   const component = ApprovedComponentSchema.parse({
-    schemaVersion: "1.0.0",
+    schemaVersion: SCHEMA_VERSION,
     id: approval.id,
     sourceId: draft.sourceId,
     name: draft.name,
@@ -94,7 +97,7 @@ export function approveDraft(
   const components = registry.components.filter((entry) => entry.id !== component.id);
   components.push(component);
   return ComponentRegistrySchema.parse({
-    schemaVersion: "1.0.0",
+    schemaVersion: SCHEMA_VERSION,
     components
   });
 }
@@ -134,23 +137,27 @@ export function interpretQuery(text: string): ComponentQuery {
 export function searchRegistry(
   registryInput: ComponentRegistry,
   queryInput: ComponentQuery,
-  options: { threshold?: number; limit?: number } = {}
+  options: { limit?: number } = {}
 ): RegistrySearchResult {
   const registry = ComponentRegistrySchema.parse(registryInput);
   const query = ComponentQuerySchema.parse(queryInput);
-  const threshold = options.threshold ?? 0.6;
   const limit = options.limit ?? 5;
 
   const matches = registry.components
+    .filter((component) =>
+      query.requiredCapabilities.every((capability) =>
+        component.capabilities.includes(capability)
+      )
+    )
     .map((component) => scoreComponent(component, query))
-    .filter((match) => match.score >= threshold)
+    .filter((match) => match.score >= SEARCH_MATCH_THRESHOLD)
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
 
   return {
     status: matches.length > 0 ? "match" : "no_match",
     matches,
-    threshold
+    threshold: SEARCH_MATCH_THRESHOLD
   };
 }
 

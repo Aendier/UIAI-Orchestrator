@@ -42,6 +42,19 @@ describe("CLI", () => {
     });
     expect(JSON.stringify(output)).not.toContain("serializedFields");
     expect(JSON.stringify(output)).not.toContain("private-guid");
+    expect(output.observations[1]?.root).toMatchObject({
+      children: [
+        expect.anything(),
+        {
+          text: {
+            characters: "100",
+            fontFamily: "GameFont",
+            fontStyle: "Regular",
+            fontSize: 18
+          }
+        }
+      ]
+    });
   });
 
   it("requires explicit approval before natural-language registry search", async () => {

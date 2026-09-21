@@ -12,6 +12,7 @@ import {
   interpretQuery,
   searchRegistry
 } from "./registry/index.js";
+import { SCHEMA_VERSION } from "./schema-version.js";
 import { analyzeComponent } from "./semantic/index.js";
 
 async function main(argv: string[]): Promise<void> {
@@ -117,7 +118,7 @@ async function readRegistry(path: string): Promise<unknown> {
   try {
     return await readJson(path);
   } catch (error: unknown) {
-    if (isMissingFile(error)) return { schemaVersion: "1.0.0", components: [] };
+    if (isMissingFile(error)) return { schemaVersion: SCHEMA_VERSION, components: [] };
     throw error;
   }
 }

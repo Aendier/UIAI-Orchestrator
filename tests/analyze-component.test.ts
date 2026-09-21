@@ -152,6 +152,23 @@ describe("analyzeComponent", () => {
   });
 
   it("runs independent structural and visual roles through an OpenAI-compatible endpoint", async () => {
+    const observationWithImages: ComponentObservation = {
+      ...observation,
+      root: {
+        ...observation.root,
+        imageBase64: "root-image",
+        children: [
+          {
+            sourceId: "reward-label",
+            name: "Label",
+            nodeType: "TEXT",
+            visible: true,
+            imageBase64: "child-image",
+            children: []
+          }
+        ]
+      }
+    };
     const responseBody = {
       choices: [
         {
@@ -177,7 +194,7 @@ describe("analyzeComponent", () => {
     );
 
     const draft = await analyzeComponent({
-      observation,
+      observation: observationWithImages,
       structuralAgent: agents.structuralAgent,
       visualAgent: agents.visualAgent,
       adjudicator: agents.adjudicator
@@ -187,10 +204,14 @@ describe("analyzeComponent", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const requestBodies = fetchMock.mock.calls.map((call) =>
       JSON.parse(String((call[1] as RequestInit).body)) as {
-        messages: Array<{ content: string }>;
+        messages: Array<{ content: unknown }>;
       }
     );
-    expect(requestBodies[0]?.messages[0]?.content).toContain("结构分析");
-    expect(requestBodies[1]?.messages[0]?.content).toContain("视觉分析");
+    expect(String(requestBodies[0]?.messages[0]?.content)).toContain("结构分析");
+    expect(String(requestBodies[1]?.messages[0]?.content)).toContain("视觉分析");
+    const visualContent = requestBodies[1]?.messages[1]?.content as Array<{
+      type: string;
+    }>;
+    expect(visualContent.filter((part) => part.type === "image_url")).toHaveLength(2);
   });
 });

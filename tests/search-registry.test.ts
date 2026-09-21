@@ -39,6 +39,31 @@ const registry: ComponentRegistry = {
 };
 
 describe("searchRegistry", () => {
+  it.each([
+    [
+      "显示奖励图标、数量和品质的格子",
+      {
+        semanticType: "item",
+        role: "reward.display",
+        requiredCapabilities: ["display.icon", "display.quantity", "display.rarity"]
+      }
+    ],
+    [
+      "页面顶部的关闭按钮",
+      { semanticType: "button", role: "common.close", requiredCapabilities: ["click"] }
+    ],
+    [
+      "一个 Tab",
+      {
+        semanticType: "navigation",
+        role: "navigation.tab",
+        requiredCapabilities: ["navigation.select", "selected.state"]
+      }
+    ]
+  ])("interprets the controlled MVP intent: %s", (text, expected) => {
+    expect(interpretQuery(text)).toMatchObject(expected);
+  });
+
   it("ranks an approved component using semantic, role and capability evidence", () => {
     const result = searchRegistry(registry, {
       text: "用于领取奖励的按钮",
@@ -63,6 +88,25 @@ describe("searchRegistry", () => {
   it("returns no_match for a request outside the controlled taxonomy", () => {
     const query = interpretQuery("一个可以拖动旋转的三维模型查看器");
     const result = searchRegistry(registry, query);
+
+    expect(result).toMatchObject({ status: "no_match", matches: [] });
+  });
+
+  it("rejects candidates missing any required capability", () => {
+    const incompleteRewardItem = approved({
+      id: "reward.item",
+      sourceId: "reward-item",
+      name: "RewardItem",
+      semanticType: "item",
+      role: "reward.display",
+      capabilities: ["display.icon"],
+      useCases: ["显示奖励图标、数量和品质"]
+    });
+    const query = interpretQuery("显示奖励图标、数量和品质的格子");
+    const result = searchRegistry(
+      { schemaVersion: "1.0.0", components: [incompleteRewardItem] },
+      query
+    );
 
     expect(result).toMatchObject({ status: "no_match", matches: [] });
   });

@@ -124,13 +124,31 @@ function observationMessage(
   includeImage: boolean
 ): string | Array<Record<string, unknown>> {
   const text = JSON.stringify(sanitizeObservation(observation));
-  if (!includeImage || !observation.root.imageBase64) return text;
+  if (!includeImage) return text;
+  const images = collectImages(observation.root, "root");
+  if (images.length === 0) return text;
   return [
     { type: "text", text },
-    {
-      type: "image_url",
-      image_url: { url: `data:image/png;base64,${observation.root.imageBase64}` }
-    }
+    ...images.flatMap((item) => [
+      { type: "text", text: `Image evidence for ${item.sourcePath}` },
+      {
+        type: "image_url",
+        image_url: { url: `data:image/png;base64,${item.imageBase64}` }
+      }
+    ])
+  ];
+}
+
+function collectImages(
+  node: ObservedNode,
+  sourcePath: string
+): Array<{ sourcePath: string; imageBase64: string }> {
+  const own = node.imageBase64 ? [{ sourcePath, imageBase64: node.imageBase64 }] : [];
+  return [
+    ...own,
+    ...node.children.flatMap((child, index) =>
+      collectImages(child, `${sourcePath}.children[${index}]`)
+    )
   ];
 }
 

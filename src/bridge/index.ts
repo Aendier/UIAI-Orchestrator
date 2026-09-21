@@ -5,6 +5,7 @@ import {
   type ObservationDocument,
   type ObservedNode
 } from "../observation/index.js";
+import { BRIDGE_SCHEMA_VERSION, SCHEMA_VERSION } from "../schema-version.js";
 
 const BridgeComponentRefSchema = z
   .object({
@@ -24,77 +25,51 @@ const BridgeRectSchema = z.object({
   rotation: z.number().default(0)
 });
 
-interface BridgeNode {
-  id?: string | undefined;
-  name: string;
-  displayName?: string | undefined;
-  type?: string | undefined;
-  visible?: boolean | undefined;
-  opacity?: number | undefined;
-  u2f?: z.infer<typeof BridgeComponentRefSchema> | undefined;
-  layout?: {
-    rect?: z.infer<typeof BridgeRectSchema> | undefined;
-    text?: {
-      characters?: string | undefined;
-      fontSize?: number | undefined;
-      fontName?: {
-        family?: string | undefined;
-        style?: string | undefined;
-      } | undefined;
-    } | undefined;
-    style?: {
-      backgroundColor?: string | undefined;
-      backgroundOpacity?: number | undefined;
-      fillType?: string | undefined;
-    } | undefined;
-    imageBase64?: string | undefined;
-  } | undefined;
-  children: BridgeNode[];
-}
+const BridgeNodeSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().min(1),
+    displayName: z.string().optional(),
+    type: z.string().optional(),
+    visible: z.boolean().optional(),
+    opacity: z.number().optional(),
+    u2f: BridgeComponentRefSchema.optional(),
+    layout: z
+      .object({
+        rect: BridgeRectSchema.optional(),
+        text: z
+          .object({
+            characters: z.string().optional(),
+            fontSize: z.number().optional(),
+            fontName: z
+              .object({
+                family: z.string().optional(),
+                style: z.string().optional()
+              })
+              .optional()
+          })
+          .optional(),
+        style: z
+          .object({
+            backgroundColor: z.string().optional(),
+            backgroundOpacity: z.number().optional(),
+            fillType: z.string().optional()
+          })
+          .optional(),
+        imageBase64: z.string().optional()
+      })
+      .optional(),
+    get children() {
+      return z.array(BridgeNodeSchema).default([]);
+    }
+  })
+  .passthrough();
 
-const BridgeNodeSchema: z.ZodType<BridgeNode> = z.lazy(() =>
-  z
-    .object({
-      id: z.string().optional(),
-      name: z.string().min(1),
-      displayName: z.string().optional(),
-      type: z.string().optional(),
-      visible: z.boolean().optional(),
-      opacity: z.number().optional(),
-      u2f: BridgeComponentRefSchema.optional(),
-      layout: z
-        .object({
-          rect: BridgeRectSchema.optional(),
-          text: z
-            .object({
-              characters: z.string().optional(),
-              fontSize: z.number().optional(),
-              fontName: z
-                .object({
-                  family: z.string().optional(),
-                  style: z.string().optional()
-                })
-                .optional()
-            })
-            .optional(),
-          style: z
-            .object({
-              backgroundColor: z.string().optional(),
-              backgroundOpacity: z.number().optional(),
-              fillType: z.string().optional()
-            })
-            .optional(),
-          imageBase64: z.string().optional()
-        })
-        .optional(),
-      children: z.array(BridgeNodeSchema).default([])
-    })
-    .passthrough()
-);
+type BridgeNode = z.infer<typeof BridgeNodeSchema>;
 
 const BridgeDocumentSchema = z
   .object({
-    version: z.literal("0.1.0"),
+    version: z.literal(BRIDGE_SCHEMA_VERSION),
     sourceCanvas: z.string().min(1),
     exportTime: z.string().datetime().optional(),
     nodes: z.array(BridgeNodeSchema).min(1)
@@ -104,9 +79,9 @@ const BridgeDocumentSchema = z
 export function adaptBridgeDocument(input: unknown): ObservationDocument {
   const source = BridgeDocumentSchema.parse(input);
   return ObservationDocumentSchema.parse({
-    schemaVersion: "1.0.0",
+    schemaVersion: SCHEMA_VERSION,
     observations: source.nodes.map((node, index) => ({
-      schemaVersion: "1.0.0",
+      schemaVersion: SCHEMA_VERSION,
       source: {
         kind: "unity-figma-bridge",
         documentName: source.sourceCanvas,
@@ -147,6 +122,7 @@ function adaptNode(node: BridgeNode, sourcePath: string): ObservedNode {
           text: {
             characters: text.characters ?? "",
             ...(text.fontName?.family ? { fontFamily: text.fontName.family } : {}),
+            ...(text.fontName?.style ? { fontStyle: text.fontName.style } : {}),
             ...(text.fontSize === undefined ? {} : { fontSize: text.fontSize })
           }
         }),

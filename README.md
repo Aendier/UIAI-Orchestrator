@@ -57,4 +57,4 @@ pnpm build
 ```
 
 See [CONTEXT.md](CONTEXT.md) for domain terms and
-[MVP 0](docs/specs/mvp-0.md) for acceptance criteria.
+[ADR 0001](docs/adr/0001-read-only-bridge-and-reviewed-registry.md) for the trust boundary.
