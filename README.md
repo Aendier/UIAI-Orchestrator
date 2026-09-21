@@ -4,6 +4,14 @@ An auditable TypeScript MVP that adapts UnityFigmaBridge exports, uses independe
 roles to create semantic drafts, requires human approval, and searches only approved
 component knowledge.
 
+## Direct use
+
+Double-click `启动组件注册表.cmd`. The local workbench opens in the browser with the
+12 sample components already loaded. When launched from AIOA, it uses the model key
+from the current process without writing that key to disk. If the configured key does
+not match the service, click the model status in the top bar and enter the service URL,
+model name, and key in the browser. The key remains in memory only.
+
 ## Requirements
 
 - Node.js 22 or newer

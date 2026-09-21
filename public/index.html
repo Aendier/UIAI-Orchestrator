@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UI Component Registry</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">UI</span>
+        <div>
+          <h1>Component Registry</h1>
+          <p>组件理解与审核工作台</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="model-status" class="status-pill" type="button">检查模型中</button>
+        <label class="button secondary" for="import-file">导入 JSON</label>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar" aria-label="组件列表">
+        <div class="sidebar-head">
+          <div>
+            <h2>组件库</h2>
+            <p id="component-count">正在加载</p>
+          </div>
+          <input id="component-filter" class="compact-input" type="search" placeholder="筛选组件" />
+        </div>
+        <div id="component-list" class="component-list"></div>
+      </aside>
+
+      <section class="content">
+        <div class="search-band">
+          <form id="search-form" class="search-form">
+            <label for="search-query">搜索 Approved Registry</label>
+            <div class="search-row">
+              <input
+                id="search-query"
+                type="search"
+                value="用于领取奖励的按钮"
+                placeholder="描述你需要的组件"
+              />
+              <button class="button primary" type="submit">搜索</button>
+            </div>
+          </form>
+          <div id="search-result" class="search-result" aria-live="polite"></div>
+        </div>
+
+        <div id="empty-state" class="empty-state">
+          <h2>选择一个组件</h2>
+          <p>查看来源事实、运行多 Agent 分析，并在人工确认后加入 Registry。</p>
+        </div>
+
+        <div id="component-detail" class="detail-layout" hidden>
+          <section class="facts-pane">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">SOURCE OBSERVATION</p>
+                <h2 id="detail-name"></h2>
+              </div>
+              <span id="detail-state" class="state-badge"></span>
+            </div>
+            <dl id="facts-list" class="facts-list"></dl>
+            <div class="action-strip">
+              <button id="analyze-button" class="button primary" type="button">运行多 Agent 分析</button>
+              <span id="analysis-note" class="muted"></span>
+            </div>
+          </section>
+
+          <section class="review-pane">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">HUMAN REVIEW</p>
+                <h2>语义审核</h2>
+              </div>
+            </div>
+            <div id="draft-empty" class="review-empty">
+              <p>运行分析后，这里会展示结构 Agent、视觉 Agent 和裁决结果。</p>
+            </div>
+            <div id="draft-content" hidden>
+              <div id="decision-summary" class="decision-summary"></div>
+              <div id="confidence-bars" class="confidence-bars"></div>
+              <div class="evidence-section">
+                <h3>证据</h3>
+                <div id="evidence-list" class="evidence-list"></div>
+              </div>
+              <form id="approve-form" class="approve-form">
+                <div class="field-row">
+                  <label>
+                    Registry ID
+                    <input id="registry-id" required placeholder="button.reward.claim" />
+                  </label>
+                  <label>
+                    审核人
+                    <input id="reviewer" required value="本地审核员" />
+                  </label>
+                </div>
+                <label>
+                  用途（逗号分隔）
+                  <input id="use-cases" placeholder="领取奖励, claim reward" />
+                </label>
+                <label>
+                  视觉特征（逗号分隔）
+                  <input id="visual-traits" placeholder="宽按钮, 主操作" />
+                </label>
+                <button class="button approve" type="submit">人工批准并加入 Registry</button>
+              </form>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <dialog id="model-dialog" class="model-dialog">
+      <form id="model-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">OPENAI-COMPATIBLE</p>
+            <h2>模型设置</h2>
+          </div>
+          <button id="close-model-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <label>
+          服务地址
+          <input id="model-base-url" type="url" required value="https://api.openai.com/v1" />
+        </label>
+        <label>
+          模型
+          <input id="model-name" required value="gpt-4.1-mini" />
+        </label>
+        <label>
+          API Key
+          <input id="model-api-key" type="password" required autocomplete="off" />
+        </label>
+        <p class="security-note">密钥仅保留在当前本地服务内存中，关闭服务后失效。</p>
+        <button class="button primary" type="submit">应用设置</button>
+      </form>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
