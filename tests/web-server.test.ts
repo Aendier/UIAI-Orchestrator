@@ -151,6 +151,55 @@ describe("local workbench HTTP API", () => {
     expect(crossSite.status).toBe(403);
   });
 
+  it("does not let an in-flight analysis write a stale Draft after import", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    let resolveAnalysis!: (value: typeof proposal) => void;
+    const delayedProposal = new Promise<typeof proposal>((resolveProposal) => {
+      resolveAnalysis = resolveProposal;
+    });
+    const delayedAgent: AnalysisAgent = {
+      analyze: vi.fn().mockReturnValue(delayedProposal)
+    };
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      agents: {
+        structuralAgent: delayedAgent,
+        visualAgent: delayedAgent,
+        adjudicator: { adjudicate: vi.fn() }
+      }
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    const analysis = postJson(`${address}/api/analyze`, {
+      sourceId: "guid-reward-claim"
+    });
+    await vi.waitFor(() => expect(delayedAgent.analyze).toHaveBeenCalledTimes(2));
+    const bridgeDocument = JSON.parse(
+      await readFile(resolve("fixtures/bridge-components.json"), "utf8")
+    ) as unknown;
+    let importFinished = false;
+    const importRequest = postJson(`${address}/api/import`, bridgeDocument).then(
+      (value) => {
+        importFinished = true;
+        return value;
+      }
+    );
+
+    await new Promise((resolveTick) => setTimeout(resolveTick, 20));
+    expect(importFinished).toBe(false);
+    resolveAnalysis(proposal);
+    await Promise.all([analysis, importRequest]);
+
+    const state = (await getJson(`${address}/api/state`)) as {
+      observations: { items: Array<{ draft?: unknown }> };
+      registry: { total: number };
+    };
+    expect(state.observations.items.every((item) => item.draft === undefined)).toBe(true);
+    expect(state.registry.total).toBe(0);
+  });
+
   it.runIf(process.platform === "win32")(
     "passes the real double-click launcher check without pnpm",
     async () => {

@@ -55,6 +55,15 @@ const DraftDocumentSchema = z.object({
   drafts: z.array(SemanticDraftSchema)
 });
 
+const WorkbenchStateSchema = z.object({
+  schemaVersion: z.literal(SCHEMA_VERSION),
+  observations: ObservationDocumentSchema,
+  drafts: DraftDocumentSchema,
+  registry: ComponentRegistrySchema
+});
+
+type WorkbenchState = z.infer<typeof WorkbenchStateSchema>;
+
 const AnalyzeRequestSchema = z.object({ sourceId: z.string().min(1) });
 const ApproveRequestSchema = z.object({
   sourceId: z.string().min(1),
@@ -160,11 +169,7 @@ async function routeRequest(
   if (method === "POST") assertTrustedMutation(request);
 
   if (method === "GET" && path === "/api/state") {
-    const [observations, drafts, registry] = await Promise.all([
-      context.store.readObservations(),
-      context.store.readDrafts(),
-      context.store.readRegistry()
-    ]);
+    const { observations, drafts, registry } = await context.store.readSnapshot();
     const draftBySource = new Map(drafts.map((draft) => [draft.sourceId, draft]));
     const approvedBySource = new Map(
       registry.components.map((component) => [component.sourceId, component])
@@ -194,24 +199,14 @@ async function routeRequest(
       throw new HttpError(409, "当前进程没有模型密钥，请从 AIOA 会话启动工作台。");
     }
     const input = AnalyzeRequestSchema.parse(await readJsonBody(request));
-    const observations = await context.store.readObservations();
-    const observation = observations.observations.find(
-      (item) => item.root.sourceId === input.sourceId
-    );
-    if (!observation) throw new HttpError(404, "未找到这个组件。");
-    const draft = await analyzeComponent({ observation, ...context.runtime.agents });
-    await context.store.upsertDraft(draft);
+    const draft = await context.store.analyze(input.sourceId, context.runtime.agents);
     sendJson(response, 200, draft);
     return;
   }
 
   if (method === "POST" && path === "/api/approve") {
     const input = ApproveRequestSchema.parse(await readJsonBody(request));
-    const draft = (await context.store.readDrafts()).find(
-      (item) => item.sourceId === input.sourceId
-    );
-    if (!draft) throw new HttpError(409, "请先完成 AI 分析，再进行人工批准。");
-    const registry = await context.store.approve(draft, {
+    const registry = await context.store.approveBySource(input.sourceId, {
       id: input.id,
       approvedBy: input.reviewer,
       useCases: input.useCases,
@@ -272,98 +267,116 @@ async function routeRequest(
 }
 
 class WorkbenchStore {
-  readonly #observationsPath: string;
-  readonly #draftsPath: string;
-  readonly #registryPath: string;
+  readonly #statePath: string;
+  readonly #legacyObservationsPath: string;
+  readonly #legacyDraftsPath: string;
+  readonly #legacyRegistryPath: string;
   #mutationQueue: Promise<void> = Promise.resolve();
 
   public constructor(
     private readonly dataDirectory: string,
     private readonly fixturePath: string
   ) {
-    this.#observationsPath = resolve(dataDirectory, "observations.json");
-    this.#draftsPath = resolve(dataDirectory, "drafts.json");
-    this.#registryPath = resolve(dataDirectory, "registry.json");
+    this.#statePath = resolve(dataDirectory, "workbench.json");
+    this.#legacyObservationsPath = resolve(dataDirectory, "observations.json");
+    this.#legacyDraftsPath = resolve(dataDirectory, "drafts.json");
+    this.#legacyRegistryPath = resolve(dataDirectory, "registry.json");
   }
 
   public async initialize(): Promise<void> {
     await mkdir(this.dataDirectory, { recursive: true });
-    await this.ensureFile(this.#observationsPath, async () =>
-      adaptBridgeDocument(await readJsonFile(this.fixturePath))
-    );
-    await this.ensureFile(this.#draftsPath, async () => ({
-      schemaVersion: SCHEMA_VERSION,
-      drafts: []
-    }));
-    await this.ensureFile(this.#registryPath, async () => ({
-      schemaVersion: SCHEMA_VERSION,
-      components: []
-    }));
+    try {
+      WorkbenchStateSchema.parse(await readJsonFile(this.#statePath));
+    } catch (error: unknown) {
+      if (!isMissingFile(error)) throw error;
+      await writeJsonFile(this.#statePath, await this.createInitialState());
+    }
   }
 
-  public async readObservations(): Promise<ObservationDocument> {
-    return ObservationDocumentSchema.parse(await readJsonFile(this.#observationsPath));
-  }
-
-  public async writeObservations(value: ObservationDocument): Promise<void> {
-    await writeJsonFile(this.#observationsPath, ObservationDocumentSchema.parse(value));
-  }
-
-  public async readDrafts(): Promise<SemanticDraft[]> {
-    return DraftDocumentSchema.parse(await readJsonFile(this.#draftsPath)).drafts;
-  }
-
-  public async writeDrafts(drafts: SemanticDraft[]): Promise<void> {
-    await writeJsonFile(
-      this.#draftsPath,
-      DraftDocumentSchema.parse({ schemaVersion: SCHEMA_VERSION, drafts })
-    );
-  }
-
-  public async upsertDraft(draft: SemanticDraft): Promise<void> {
-    await this.serializeMutation(async () => {
-      const drafts = (await this.readDrafts()).filter(
-        (item) => item.sourceId !== draft.sourceId
-      );
-      drafts.push(draft);
-      await this.writeDrafts(drafts);
-    });
+  public async readSnapshot(): Promise<{
+    observations: ObservationDocument;
+    drafts: SemanticDraft[];
+    registry: ComponentRegistry;
+  }> {
+    const state = await this.readState();
+    return {
+      observations: state.observations,
+      drafts: state.drafts.drafts,
+      registry: state.registry
+    };
   }
 
   public async readRegistry(): Promise<ComponentRegistry> {
-    return ComponentRegistrySchema.parse(await readJsonFile(this.#registryPath));
+    return (await this.readState()).registry;
   }
 
-  public async writeRegistry(value: ComponentRegistry): Promise<void> {
-    await writeJsonFile(this.#registryPath, ComponentRegistrySchema.parse(value));
+  public async analyze(sourceId: string, agents: AgentSet): Promise<SemanticDraft> {
+    return this.serializeMutation(async () => {
+      const state = await this.readState();
+      const observation = state.observations.observations.find(
+        (item) => item.root.sourceId === sourceId
+      );
+      if (!observation) throw new HttpError(404, "未找到这个组件。");
+      const draft = await analyzeComponent({ observation, ...agents });
+      const drafts = state.drafts.drafts.filter((item) => item.sourceId !== sourceId);
+      drafts.push(draft);
+      await this.writeState({
+        ...state,
+        drafts: { schemaVersion: SCHEMA_VERSION, drafts }
+      });
+      return draft;
+    });
   }
 
-  public async approve(
-    draft: SemanticDraft,
+  public async approveBySource(
+    sourceId: string,
     approval: ApprovalInput
   ): Promise<ComponentRegistry> {
     return this.serializeMutation(async () => {
-      const registry = approveDraft(draft, await this.readRegistry(), approval);
-      await this.writeRegistry(registry);
+      const state = await this.readState();
+      const draft = state.drafts.drafts.find((item) => item.sourceId === sourceId);
+      if (!draft) {
+        throw new HttpError(409, "请先完成 AI 分析，再进行人工批准。");
+      }
+      const registry = approveDraft(draft, state.registry, approval);
+      await this.writeState({ ...state, registry });
       return registry;
     });
   }
 
   public async replaceLibrary(observations: ObservationDocument): Promise<void> {
     await this.serializeMutation(async () => {
-      await this.writeObservations(observations);
-      await this.writeDrafts([]);
-      await this.writeRegistry({ schemaVersion: SCHEMA_VERSION, components: [] });
+      await this.writeState({
+        schemaVersion: SCHEMA_VERSION,
+        observations,
+        drafts: { schemaVersion: SCHEMA_VERSION, drafts: [] },
+        registry: { schemaVersion: SCHEMA_VERSION, components: [] }
+      });
     });
   }
 
-  private async ensureFile(path: string, create: () => Promise<unknown>): Promise<void> {
-    try {
-      await readFile(path);
-    } catch (error: unknown) {
-      if (!isMissingFile(error)) throw error;
-      await writeJsonFile(path, await create());
-    }
+  private async readState(): Promise<WorkbenchState> {
+    return WorkbenchStateSchema.parse(await readJsonFile(this.#statePath));
+  }
+
+  private async writeState(state: WorkbenchState): Promise<void> {
+    await writeJsonFile(this.#statePath, WorkbenchStateSchema.parse(state));
+  }
+
+  private async createInitialState(): Promise<WorkbenchState> {
+    const [legacyObservations, legacyDrafts, legacyRegistry] = await Promise.all([
+      readOptionalJson(this.#legacyObservationsPath, ObservationDocumentSchema),
+      readOptionalJson(this.#legacyDraftsPath, DraftDocumentSchema),
+      readOptionalJson(this.#legacyRegistryPath, ComponentRegistrySchema)
+    ]);
+    return WorkbenchStateSchema.parse({
+      schemaVersion: SCHEMA_VERSION,
+      observations:
+        legacyObservations ??
+        adaptBridgeDocument(await readJsonFile(this.fixturePath)),
+      drafts: legacyDrafts ?? { schemaVersion: SCHEMA_VERSION, drafts: [] },
+      registry: legacyRegistry ?? { schemaVersion: SCHEMA_VERSION, components: [] }
+    });
   }
 
   private async serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -412,6 +425,18 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
 
 async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
+}
+
+async function readOptionalJson<T>(
+  path: string,
+  schema: z.ZodType<T>
+): Promise<T | undefined> {
+  try {
+    return schema.parse(await readJsonFile(path));
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return undefined;
+    throw error;
+  }
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
