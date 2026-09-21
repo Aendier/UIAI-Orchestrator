@@ -1,0 +1,137 @@
+{
+  "version": "0.1.0",
+  "sourceCanvas": "UI Component Library",
+  "exportTime": "2026-09-21T00:00:00.000Z",
+  "nodes": [
+    {
+      "id": "reward-claim",
+      "name": "RewardClaimButton",
+      "type": "INSTANCE",
+      "u2f": {
+        "prefabGuid": "guid-reward-claim",
+        "prefabPath": "Assets/UI/Reward/UI_Button_Reward_Claim.prefab",
+        "componentTypes": ["RectTransform", "Image", "Button"],
+        "serializedFields": "{\"internalState\":1}",
+        "resourceGuids": { "sprite": "private-guid" }
+      },
+      "layout": { "rect": { "x": 0, "y": 0, "width": 240, "height": 72, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "reward-item",
+      "name": "RewardItem",
+      "type": "COMPONENT",
+      "u2f": {
+        "prefabGuid": "guid-reward-item",
+        "prefabPath": "Assets/UI/Reward/UI_Com_RewardItem.prefab",
+        "scriptType": "Game.UI.RewardItemView",
+        "componentTypes": ["RectTransform", "Image", "RewardItemView"]
+      },
+      "layout": { "rect": { "x": 260, "y": 0, "width": 112, "height": 128, "rotation": 0 } },
+      "children": [
+        {
+          "id": "reward-icon",
+          "name": "Icon",
+          "type": "RECTANGLE",
+          "u2f": { "componentTypes": ["Image"], "isNested": true },
+          "layout": { "rect": { "x": 8, "y": 8, "width": 96, "height": 96, "rotation": 0 } },
+          "children": []
+        },
+        {
+          "id": "reward-quantity",
+          "name": "Quantity",
+          "type": "TEXT",
+          "u2f": { "componentTypes": ["TextMeshProUGUI"], "isNested": true },
+          "layout": {
+            "rect": { "x": 8, "y": 100, "width": 96, "height": 20, "rotation": 0 },
+            "text": { "characters": "100", "fontSize": 18, "fontName": { "family": "GameFont", "style": "Regular" } }
+          },
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "close-button",
+      "name": "CloseButton",
+      "type": "INSTANCE",
+      "u2f": { "prefabGuid": "guid-close", "prefabPath": "Assets/UI/Common/UI_Button_Close.prefab", "componentTypes": ["RectTransform", "Image", "Button"] },
+      "layout": { "rect": { "x": 392, "y": 0, "width": 48, "height": 48, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "navigation-tab",
+      "name": "ActivityTab",
+      "type": "INSTANCE",
+      "u2f": { "prefabGuid": "guid-tab", "prefabPath": "Assets/UI/Common/UI_Tab_Activity.prefab", "componentTypes": ["RectTransform", "Image", "Button"] },
+      "layout": { "rect": { "x": 460, "y": 0, "width": 160, "height": 56, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "primary-button",
+      "name": "PrimaryButton",
+      "type": "INSTANCE",
+      "u2f": { "prefabGuid": "guid-primary", "prefabPath": "Assets/UI/Common/UI_Button_Primary.prefab", "componentTypes": ["RectTransform", "Image", "Button"] },
+      "layout": { "rect": { "x": 0, "y": 160, "width": 220, "height": 64, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "shop-buy",
+      "name": "ShopBuyButton",
+      "type": "INSTANCE",
+      "u2f": { "prefabGuid": "guid-shop-buy", "prefabPath": "Assets/UI/Shop/UI_Button_Buy.prefab", "componentTypes": ["RectTransform", "Image", "Button"] },
+      "layout": { "rect": { "x": 240, "y": 160, "width": 220, "height": 64, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "progress-bar",
+      "name": "ProgressBar",
+      "type": "FRAME",
+      "u2f": { "prefabGuid": "guid-progress", "prefabPath": "Assets/UI/Common/UI_Progress.prefab", "componentTypes": ["RectTransform", "Image"] },
+      "layout": { "rect": { "x": 0, "y": 244, "width": 320, "height": 32, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "common-header",
+      "name": "CommonHeader",
+      "type": "COMPONENT",
+      "u2f": { "prefabGuid": "guid-header", "prefabPath": "Assets/UI/Common/UI_Panel_Header.prefab", "componentTypes": ["RectTransform", "Image"] },
+      "layout": { "rect": { "x": 0, "y": 296, "width": 960, "height": 96, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "item-icon",
+      "name": "ItemIcon",
+      "type": "RECTANGLE",
+      "u2f": { "prefabGuid": "guid-item-icon", "prefabPath": "Assets/UI/Common/UI_Image_ItemIcon.prefab", "componentTypes": ["RectTransform", "Image"] },
+      "layout": { "rect": { "x": 480, "y": 160, "width": 96, "height": 96, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "quantity-text",
+      "name": "QuantityText",
+      "type": "TEXT",
+      "u2f": { "prefabGuid": "guid-quantity", "prefabPath": "Assets/UI/Common/UI_Text_Quantity.prefab", "componentTypes": ["RectTransform", "TextMeshProUGUI"] },
+      "layout": {
+        "rect": { "x": 596, "y": 160, "width": 120, "height": 32, "rotation": 0 },
+        "text": { "characters": "999", "fontSize": 22, "fontName": { "family": "GameFont", "style": "Regular" } }
+      },
+      "children": []
+    },
+    {
+      "id": "modal-panel",
+      "name": "ModalPanel",
+      "type": "FRAME",
+      "u2f": { "prefabGuid": "guid-modal", "prefabPath": "Assets/UI/Common/UI_Panel_Modal.prefab", "componentTypes": ["RectTransform", "Image"] },
+      "layout": { "rect": { "x": 736, "y": 160, "width": 640, "height": 720, "rotation": 0 } },
+      "children": []
+    },
+    {
+      "id": "avatar-frame",
+      "name": "AvatarFrame",
+      "type": "COMPONENT",
+      "u2f": { "prefabGuid": "guid-avatar", "prefabPath": "Assets/UI/Common/UI_Image_AvatarFrame.prefab", "componentTypes": ["RectTransform", "Image"] },
+      "layout": { "rect": { "x": 596, "y": 212, "width": 128, "height": 128, "rotation": 0 } },
+      "children": []
+    }
+  ]
+}

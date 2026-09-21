@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceId": "guid-reward-claim",
+  "name": "RewardClaimButton",
+  "proposals": {
+    "structural": {
+      "semanticType": "button",
+      "role": "reward.claim",
+      "capabilities": ["click", "text", "disabled.state"],
+      "confidence": {
+        "semanticType": 0.98,
+        "role": 0.96,
+        "capabilities": 0.92
+      },
+      "evidence": [
+        {
+          "sourcePath": "root.componentRef.componentTypes",
+          "value": ["RectTransform", "Image", "Button"],
+          "rationale": "The source contains a Unity Button."
+        }
+      ],
+      "summary": "A reward claim button."
+    },
+    "visual": {
+      "semanticType": "button",
+      "role": "reward.claim",
+      "capabilities": ["click", "text", "disabled.state"],
+      "confidence": {
+        "semanticType": 0.95,
+        "role": 0.91,
+        "capabilities": 0.9
+      },
+      "evidence": [
+        {
+          "sourcePath": "root.bounds",
+          "value": { "x": 0, "y": 0, "width": 240, "height": 72, "rotation": 0 },
+          "rationale": "The wide control geometry is consistent with a button."
+        }
+      ],
+      "summary": "A reward claim button."
+    }
+  },
+  "decision": {
+    "semanticType": "button",
+    "role": "reward.claim",
+    "capabilities": ["click", "disabled.state", "text"],
+    "confidence": {
+      "semanticType": 0.965,
+      "role": 0.935,
+      "capabilities": 0.91
+    },
+    "evidence": [
+      {
+        "sourcePath": "root.componentRef.componentTypes",
+        "value": ["RectTransform", "Image", "Button"],
+        "rationale": "The source contains a Unity Button."
+      },
+      {
+        "sourcePath": "root.bounds",
+        "value": { "x": 0, "y": 0, "width": 240, "height": 72, "rotation": 0 },
+        "rationale": "The wide control geometry is consistent with a button."
+      }
+    ],
+    "summary": "A reward claim button.",
+    "status": "draft"
+  },
+  "conflicts": []
+}
