@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
@@ -10,13 +11,15 @@ import { createOpenAICompatibleAgents } from "../ai/openai-compatible.js";
 import { adaptBridgeDocument } from "../bridge/index.js";
 import {
   ObservationDocumentSchema,
-  type ObservationDocument
+  type ObservationDocument,
+  type ObservedNode
 } from "../observation/index.js";
 import {
   approveDraft,
   ComponentRegistrySchema,
   interpretQuery,
   searchRegistry,
+  type ApprovalInput,
   type ComponentRegistry
 } from "../registry/index.js";
 import { SCHEMA_VERSION } from "../schema-version.js";
@@ -154,6 +157,8 @@ async function routeRequest(
   const method = request.method ?? "GET";
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
 
+  if (method === "POST") assertTrustedMutation(request);
+
   if (method === "GET" && path === "/api/state") {
     const [observations, drafts, registry] = await Promise.all([
       context.store.readObservations(),
@@ -206,13 +211,12 @@ async function routeRequest(
       (item) => item.sourceId === input.sourceId
     );
     if (!draft) throw new HttpError(409, "请先完成 AI 分析，再进行人工批准。");
-    const registry = approveDraft(draft, await context.store.readRegistry(), {
+    const registry = await context.store.approve(draft, {
       id: input.id,
       approvedBy: input.reviewer,
       useCases: input.useCases,
       visualTraits: input.visualTraits
     });
-    await context.store.writeRegistry(registry);
     sendJson(response, 200, registry);
     return;
   }
@@ -245,9 +249,12 @@ async function routeRequest(
 
   if (method === "POST" && path === "/api/import") {
     const imported = adaptBridgeDocument(await readJsonBody(request));
-    await context.store.writeObservations(imported);
-    await context.store.writeDrafts([]);
-    sendJson(response, 200, { imported: imported.observations.length });
+    await context.store.replaceLibrary(imported);
+    sendJson(response, 200, {
+      imported: imported.observations.length,
+      clearedDrafts: true,
+      clearedRegistry: true
+    });
     return;
   }
 
@@ -268,6 +275,7 @@ class WorkbenchStore {
   readonly #observationsPath: string;
   readonly #draftsPath: string;
   readonly #registryPath: string;
+  #mutationQueue: Promise<void> = Promise.resolve();
 
   public constructor(
     private readonly dataDirectory: string,
@@ -313,11 +321,13 @@ class WorkbenchStore {
   }
 
   public async upsertDraft(draft: SemanticDraft): Promise<void> {
-    const drafts = (await this.readDrafts()).filter(
-      (item) => item.sourceId !== draft.sourceId
-    );
-    drafts.push(draft);
-    await this.writeDrafts(drafts);
+    await this.serializeMutation(async () => {
+      const drafts = (await this.readDrafts()).filter(
+        (item) => item.sourceId !== draft.sourceId
+      );
+      drafts.push(draft);
+      await this.writeDrafts(drafts);
+    });
   }
 
   public async readRegistry(): Promise<ComponentRegistry> {
@@ -328,6 +338,25 @@ class WorkbenchStore {
     await writeJsonFile(this.#registryPath, ComponentRegistrySchema.parse(value));
   }
 
+  public async approve(
+    draft: SemanticDraft,
+    approval: ApprovalInput
+  ): Promise<ComponentRegistry> {
+    return this.serializeMutation(async () => {
+      const registry = approveDraft(draft, await this.readRegistry(), approval);
+      await this.writeRegistry(registry);
+      return registry;
+    });
+  }
+
+  public async replaceLibrary(observations: ObservationDocument): Promise<void> {
+    await this.serializeMutation(async () => {
+      await this.writeObservations(observations);
+      await this.writeDrafts([]);
+      await this.writeRegistry({ schemaVersion: SCHEMA_VERSION, components: [] });
+    });
+  }
+
   private async ensureFile(path: string, create: () => Promise<unknown>): Promise<void> {
     try {
       await readFile(path);
@@ -335,6 +364,15 @@ class WorkbenchStore {
       if (!isMissingFile(error)) throw error;
       await writeJsonFile(path, await create());
     }
+  }
+
+  private async serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#mutationQueue.then(operation, operation);
+    this.#mutationQueue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
 }
 
@@ -377,7 +415,14 @@ async function readJsonFile(path: string): Promise<unknown> {
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await rename(temporaryPath, path);
+  } catch (error: unknown) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
@@ -394,11 +439,26 @@ function isMissingFile(error: unknown): boolean {
   );
 }
 
-function countDescendants(node: { children: Array<{ children: unknown[] }> }): number {
+function countDescendants(node: ObservedNode): number {
   return node.children.reduce(
-    (total, child) => total + 1 + countDescendants(child as never),
+    (total, child) => total + 1 + countDescendants(child),
     0
   );
+}
+
+function assertTrustedMutation(request: IncomingMessage): void {
+  const contentType = request.headers["content-type"] ?? "";
+  if (!contentType.toLocaleLowerCase().startsWith("application/json")) {
+    throw new HttpError(415, "写操作只接受 application/json。");
+  }
+  const host = request.headers.host ?? "";
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(host)) {
+    throw new HttpError(403, "拒绝非本机请求。");
+  }
+  const origin = request.headers.origin;
+  if (origin && origin !== `http://${host}`) {
+    throw new HttpError(403, "拒绝跨站写操作。");
+  }
 }
 
 function openBrowser(address: string): void {
@@ -413,9 +473,36 @@ function openBrowser(address: string): void {
 
 async function run(): Promise<void> {
   const app = await createWorkbenchServer();
-  const address = await app.listen(Number(process.env.PORT ?? 4317));
-  console.log(`UI AI Component Registry: ${address}`);
-  openBrowser(address);
+  const requestedPort = process.argv.includes("--check")
+    ? 0
+    : Number(process.env.PORT ?? 4317);
+  try {
+    const address = await app.listen(requestedPort);
+    console.log(`UI AI Component Registry: ${address}`);
+    if (process.argv.includes("--check")) {
+      await app.close();
+      console.log("Workbench launcher check passed.");
+      return;
+    }
+    if (process.env.UI_AI_NO_OPEN !== "1") openBrowser(address);
+  } catch (error: unknown) {
+    if (isAddressInUse(error) && requestedPort === 4317) {
+      const address = "http://127.0.0.1:4317";
+      console.log(`UI AI Component Registry already running: ${address}`);
+      if (process.env.UI_AI_NO_OPEN !== "1") openBrowser(address);
+      return;
+    }
+    throw error;
+  }
+}
+
+function isAddressInUse(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EADDRINUSE"
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

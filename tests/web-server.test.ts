@@ -1,11 +1,15 @@
-import { mkdtemp } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisAgent, SemanticAdjudicator } from "../src/semantic/index.js";
 import { createWorkbenchServer } from "../src/web/server.js";
+
+const execFileAsync = promisify(execFile);
 
 const proposal = {
   semanticType: "button" as const,
@@ -71,6 +75,15 @@ describe("local workbench HTTP API", () => {
       status: "match",
       matches: [{ componentId: "button.reward.claim" }]
     });
+
+    const bridgeDocument = JSON.parse(
+      await readFile(resolve("fixtures/bridge-components.json"), "utf8")
+    ) as unknown;
+    await postJson(`${address}/api/import`, bridgeDocument);
+    expect(await getJson(`${address}/api/state`)).toMatchObject({
+      observations: { total: 12 },
+      registry: { total: 0 }
+    });
   });
 
   it("accepts model settings in memory without exposing the API key", async () => {
@@ -106,6 +119,50 @@ describe("local workbench HTTP API", () => {
     });
     expect(JSON.stringify(state)).not.toContain("session-secret");
   });
+
+  it("rejects cross-site and non-JSON mutations", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    const plainText = await fetch(`${address}/api/import`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "{}"
+    });
+    expect(plainText.status).toBe(415);
+
+    const crossSite = await fetch(`${address}/api/model`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://attacker.example"
+      },
+      body: JSON.stringify({
+        baseUrl: "https://attacker.example/v1",
+        apiKey: "stolen",
+        model: "attacker-model"
+      })
+    });
+    expect(crossSite.status).toBe(403);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "passes the real double-click launcher check without pnpm",
+    async () => {
+      const { stdout } = await execFileAsync(
+        "cmd.exe",
+        ["/d", "/c", resolve("启动组件注册表.cmd"), "--check"],
+        { cwd: resolve(".") }
+      );
+
+      expect(stdout).toContain("Workbench launcher check passed.");
+    }
+  );
 });
 
 async function getJson(url: string): Promise<unknown> {

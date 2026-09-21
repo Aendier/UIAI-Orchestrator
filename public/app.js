@@ -55,6 +55,7 @@ elements.modelForm.addEventListener("submit", async (event) => {
       model: elements.modelName.value.trim(),
       apiKey: elements.modelApiKey.value
     });
+    elements.modelApiKey.value = "";
     elements.modelDialog.close();
     await refreshState(false);
     showToast("模型设置已应用到当前会话。", false);
@@ -116,7 +117,7 @@ elements.importFile.addEventListener("change", async () => {
     const result = await api("/api/import", document);
     selectedSourceId = undefined;
     await refreshState();
-    showToast(`已导入 ${result.imported} 个组件。`, false);
+    showToast(`已导入 ${result.imported} 个组件，旧草稿和 Registry 已清空。`, false);
   } catch (error) {
     showToast(error.message, true);
   } finally {
