@@ -80,6 +80,8 @@ Adapt a Bridge export:
 pnpm cli adapt --input fixtures/bridge-components.json --output observations.json
 ```
 
+`POST /api/import` replaces the workbench library and clears review results. `POST /api/sync` accepts the same Bridge `0.1.0` document, updates Observations by `prefabGuid`, and keeps existing Drafts and Registry entries. See [ADR 0006](docs/adr/0006-sync-components-by-prefab-guid.md).
+
 Analyze one observation with structural and visual roles:
 
 ```powershell

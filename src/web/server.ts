@@ -492,6 +492,17 @@ async function routeRequest(
     return;
   }
 
+  if (method === "POST" && path === "/api/sync") {
+    const imported = adaptBridgeDocument(await readJsonBody(request));
+    const result = await context.store.syncLibrary(imported);
+    sendJson(response, 200, {
+      ...result,
+      clearedDrafts: false,
+      clearedRegistry: false
+    });
+    return;
+  }
+
   if (method === "GET") {
     const asset = staticAsset(path);
     if (asset) {
@@ -591,6 +602,42 @@ class WorkbenchStore {
         drafts: { schemaVersion: SCHEMA_VERSION, drafts: [] },
         registry: { schemaVersion: SCHEMA_VERSION, components: [] }
       });
+    });
+  }
+
+  public async syncLibrary(
+    incoming: ObservationDocument
+  ): Promise<{ updated: number; added: number }> {
+    return this.serializeMutation(async () => {
+      const seen = new Set<string>();
+      for (const observation of incoming.observations) {
+        const prefabGuid = observation.root.componentRef?.prefabGuid;
+        if (!prefabGuid || prefabGuid.includes("/") || seen.has(prefabGuid)) {
+          throw new HttpError(400, "每个同步组件都需要唯一且不含 / 的 prefabGuid。");
+        }
+        seen.add(prefabGuid);
+      }
+      const state = await this.readState();
+      const replacements = new Map(
+        incoming.observations.map((observation) => [observation.root.sourceId, observation])
+      );
+      let updated = 0;
+      const merged = state.observations.observations.map((observation) => {
+        const replacement = replacements.get(observation.root.sourceId);
+        if (!replacement) return observation;
+        updated += 1;
+        replacements.delete(observation.root.sourceId);
+        return replacement;
+      });
+      const added = [...replacements.values()];
+      await this.writeState({
+        ...state,
+        observations: {
+          ...state.observations,
+          observations: [...merged, ...added]
+        }
+      });
+      return { updated, added: added.length };
     });
   }
 

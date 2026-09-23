@@ -11,8 +11,8 @@ an Approved Page owns page composition.
 The page-generation and sync stages below describe the target workflow. The current
 MVP imports each UFB Main Component as structure plus one stable screenshot, then runs
 component analysis, human review, and Approved Registry search. This repository does not
-write Figma or Unity. ADR 0001 remains authoritative for that write-back boundary, and
-ADR 0005 records the import scope.
+write Figma or Unity. ADR 0001 remains authoritative for that write-back boundary,
+ADR 0005 records the import scope, and ADR 0006 records sync by prefabGuid.
 
 1. People author Prefabs in Unity; UFB mirrors their Main Components and Instances into Figma.
 2. Independent agents propose controlled component semantics for human approval into the Registry.
@@ -121,6 +121,7 @@ A read-only snapshot of prioritized repository context, protocol/configuration f
 
 - Source adapters do not invent semantics.
 - This repository imports UFB Main Component structure and screenshots. It does not publish to Figma or write back to Unity.
+- Syncing a Bridge document updates Observations by prefabGuid and preserves Drafts and the Registry. Replacing the library still clears both.
 - Model output is validated against the Taxonomy at runtime.
 - Model credentials are never returned in browser state or Registry data; browser-entered
   overrides are accepted only for the current process and are never persisted.

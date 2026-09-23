@@ -12,6 +12,9 @@ import { createWorkbenchServer } from "../src/web/server.js";
 
 const execFileAsync = promisify(execFile);
 
+const PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
 const proposal = {
   semanticType: "button" as const,
   role: "reward.claim" as const,
@@ -536,6 +539,132 @@ describe("local workbench HTTP API", () => {
 
     const response = await fetch(`${address}/api/observations/guid-bad-preview/preview`);
     expect(response.status).toBe(415);
+  });
+
+  it("updates one component by prefabGuid and keeps review results", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const agent: AnalysisAgent = { analyze: vi.fn().mockResolvedValue(proposal) };
+    const adjudicator: SemanticAdjudicator = { adjudicate: vi.fn() };
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      agents: { structuralAgent: agent, visualAgent: agent, adjudicator }
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    await postJson(`${address}/api/analyze`, { sourceId: "guid-reward-claim" });
+    await postJson(`${address}/api/approve`, {
+      sourceId: "guid-reward-claim",
+      id: "button.reward.claim",
+      reviewer: "本地审核员",
+      useCases: ["领取奖励"],
+      visualTraits: ["宽按钮"]
+    });
+
+    const synced = await postJson(`${address}/api/sync`, {
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      nodes: [
+        {
+          name: "RewardClaimButtonV2",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-reward-claim" },
+          screenshot: PNG_BASE64
+        },
+        {
+          name: "NewBadge",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-new-badge" }
+        }
+      ]
+    });
+    expect(synced).toEqual({
+      updated: 1,
+      added: 1,
+      clearedDrafts: false,
+      clearedRegistry: false
+    });
+
+    const state = (await getJson(`${address}/api/state`)) as {
+      observations: {
+        total: number;
+        items: Array<{
+          sourceId: string;
+          name: string;
+          hasPreview: boolean;
+          draft?: { name: string };
+          approved?: { id: string; status: string };
+        }>;
+      };
+      registry: { total: number };
+    };
+    const reward = state.observations.items.find((item) => item.sourceId === "guid-reward-claim");
+    expect(state.observations.total).toBe(13);
+    expect(state.observations.items.some((item) => item.sourceId === "guid-close")).toBe(true);
+    expect(state.observations.items.some((item) => item.sourceId === "guid-new-badge")).toBe(true);
+    expect(reward).toMatchObject({
+      name: "RewardClaimButtonV2",
+      hasPreview: true,
+      draft: { name: "RewardClaimButton" },
+      approved: { id: "button.reward.claim", status: "approved" }
+    });
+    expect(state.registry.total).toBe(1);
+  });
+
+  it("rejects a sync component without a stable prefabGuid", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+    const before = await getJson(`${address}/api/state`);
+
+    for (const node of [
+      { name: "LooseNode", type: "FRAME" },
+      { name: "BadGuid", type: "COMPONENT", u2f: { prefabGuid: "guid/with/slash" } }
+    ]) {
+      const response = await fetch(`${address}/api/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          version: "0.1.0",
+          sourceCanvas: "Component Definition",
+          nodes: [node]
+        })
+      });
+      expect(response.status).toBe(400);
+    }
+
+    expect(await getJson(`${address}/api/state`)).toEqual(before);
+  });
+
+  it("rejects a sync document that repeats a prefabGuid", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+    const before = await getJson(`${address}/api/state`);
+
+    const response = await fetch(`${address}/api/sync`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: "0.1.0",
+        sourceCanvas: "Component Definition",
+        nodes: [
+          { name: "First", type: "COMPONENT", u2f: { prefabGuid: "guid-repeat" } },
+          { name: "Second", type: "COMPONENT", u2f: { prefabGuid: "guid-repeat" } }
+        ]
+      })
+    });
+    expect(response.status).toBe(400);
+    expect(await getJson(`${address}/api/state`)).toEqual(before);
   });
 });
 
