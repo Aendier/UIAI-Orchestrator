@@ -263,6 +263,15 @@ function renderManager() {
         const taskStatus = document.createElement("small");
         taskStatus.textContent = task.status;
         row.append(taskName, taskStatus);
+        if (task.report?.repositoryScan) {
+          const scanSummary = document.createElement("small");
+          const scan = task.report.repositoryScan;
+          const partial = scan.treeTruncated || scan.filesTruncated || scan.issuesTruncated
+            ? " · partial"
+            : "";
+          scanSummary.textContent = `${scan.files.length} files · ${scan.issues.length} open issues${partial}`;
+          row.append(scanSummary);
+        }
         tasks.append(row);
       }
       wrapper.append(tasks);

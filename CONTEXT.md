@@ -111,6 +111,9 @@ A versioned result returned through the Manager for one Work Item, including wor
 **Protocol Decision**:
 A versioned, structured contract decision with language-neutral schemas, compatibility rules, migration steps, and evidence, produced by the Manager's protocol-unification Work Item and consumed by repository-scoped proposals.
 
+**Repository Scan**:
+A read-only snapshot of prioritized repository context, protocol/configuration files, and open GitHub Issues or pull requests, attached to an inspection Work Item as evidence. Tree, file-selection, and issue-pagination truncation are explicit fields.
+
 ## Invariants
 
 - Source adapters do not invent semantics.

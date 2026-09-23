@@ -13,12 +13,14 @@ import {
   ManagerStateSchema,
   recordCoordinationTaskReport,
   RepositoryDescriptorSchema,
+  RepositoryScanSchema,
   retryCoordinationTask,
   startCoordinationTask,
   WorkerDescriptorSchema,
   type CoordinationPlan,
   type ManagerState,
   type RepositoryDescriptor,
+  type RepositoryScan,
   type WorkerDescriptor,
   type WorkerReport
 } from "./protocol.js";
@@ -199,6 +201,105 @@ export class ManagerStore {
       const worker = state.workers.find((candidate) => candidate.id === report.workerId);
       if (!worker) throw new ManagerStoreError(404, `Worker is not registered: ${report.workerId}`);
       this.assertWorkerGeneration(worker, report.workerGeneration);
+      const reported = recordCoordinationTaskReport(plan, taskId, report);
+      return this.replacePlan(state, reported);
+    });
+  }
+
+  public async scanRepositoryWorkItem(
+    planId: string,
+    taskId: string,
+    workerId: string,
+    workerGeneration: string,
+    scanner: (repository: RepositoryDescriptor) => Promise<RepositoryScan>
+  ): Promise<CoordinationPlan> {
+    const repository = await this.serializeMutation(async () => {
+      const state = await this.readState();
+      const worker = state.workers.find((candidate) => candidate.id === workerId);
+      if (!worker) throw new ManagerStoreError(404, `Worker is not registered: ${workerId}`);
+      this.assertWorkerGeneration(worker, workerGeneration);
+      const plan = this.requirePlan(state, planId);
+      const task = plan.workItems.find((candidate) => candidate.id === taskId);
+      if (!task) throw new ManagerStoreError(404, `Work Item is not found: ${taskId}`);
+      if (task.kind !== "inspect_repository" || task.status !== "in_progress") {
+        throw new ManagerStoreError(409, `Work Item is not an active repository inspection: ${taskId}`);
+      }
+      if (task.assignedWorkerId !== workerId) {
+        throw new ManagerStoreError(409, `Work Item is assigned to another worker: ${taskId}`);
+      }
+      const repository = plan.repositorySnapshots.find(
+        (candidate) => candidate.id === task.repositoryId
+      );
+      if (!repository) {
+        throw new ManagerStoreError(404, `Repository is not registered: ${task.repositoryId}`);
+      }
+      return RepositoryDescriptorSchema.parse(repository);
+    });
+
+    const scan = RepositoryScanSchema.parse(await scanner(repository));
+    if (scan.repositoryId !== repository.id) {
+      throw new ManagerStoreError(409, "Repository scan target does not match the Work Item.");
+    }
+    if (scan.defaultBranch !== repository.defaultBranch) {
+      throw new ManagerStoreError(409, "Repository scan branch does not match the Work Item snapshot.");
+    }
+
+    return this.serializeMutation(async () => {
+      const state = await this.readState();
+      const worker = state.workers.find((candidate) => candidate.id === workerId);
+      if (!worker) throw new ManagerStoreError(404, `Worker is not registered: ${workerId}`);
+      this.assertWorkerGeneration(worker, workerGeneration);
+      const plan = this.requirePlan(state, planId);
+      const task = plan.workItems.find((candidate) => candidate.id === taskId);
+      if (!task) throw new ManagerStoreError(404, `Work Item is not found: ${taskId}`);
+      if (task.kind !== "inspect_repository" || task.status !== "in_progress") {
+        throw new ManagerStoreError(409, `Work Item is not an active repository inspection: ${taskId}`);
+      }
+      if (task.assignedWorkerId !== workerId) {
+        throw new ManagerStoreError(409, `Work Item is assigned to another worker: ${taskId}`);
+      }
+      const currentRepository = plan.repositorySnapshots.find(
+        (candidate) => candidate.id === task.repositoryId
+      );
+      if (
+        !currentRepository ||
+        currentRepository.id !== repository.id ||
+        currentRepository.defaultBranch !== repository.defaultBranch
+      ) {
+        throw new ManagerStoreError(409, "Repository snapshot changed while the scan was running.");
+      }
+      const partialEvidence = [
+        scan.treeTruncated ? "repository tree" : undefined,
+        scan.filesTruncated ? "selected files" : undefined,
+        scan.issuesTruncated ? "open issues" : undefined
+      ].filter((value): value is string => Boolean(value));
+      const evidence = [
+        {
+          path: `github://tree/${repository.id}/${repository.defaultBranch}`,
+          summary: `Read-only scan found ${scan.files.length} selected files and ${scan.issues.length} open issues or pull requests.${partialEvidence.length > 0 ? ` Partial evidence: ${partialEvidence.join(", ")}.` : ""}`
+        },
+        ...scan.files.map((file) => ({
+          path: file.path,
+          summary: `Scanned ${file.category} evidence from ${repository.id}.`,
+          digest: file.sha
+        })),
+        ...scan.issues.map((issue) => ({
+          path: `github://issues/${issue.number}`,
+          summary: `${issue.isPullRequest ? "Open pull request" : "Open issue"}: ${issue.title}`
+        }))
+      ];
+      const report: WorkerReport = {
+        protocolVersion: MANAGER_PROTOCOL_VERSION,
+        workerId,
+        workerGeneration,
+        outcome: "completed",
+        summary: `Read-only repository scan completed for ${repository.id}.`,
+        changedFiles: [],
+        tests: ["github-read-only-scan"],
+        blockers: [],
+        evidence,
+        repositoryScan: scan
+      };
       const reported = recordCoordinationTaskReport(plan, taskId, report);
       return this.replacePlan(state, reported);
     });

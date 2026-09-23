@@ -36,6 +36,43 @@ const CoordinationTaskStatusSchema = z.enum([
 
 const WriteIntentSchema = z.enum(["read_only", "proposal", "write"]);
 
+const RepositoryFileCategorySchema = z.enum(["context", "protocol", "configuration"]);
+
+export const RepositoryFileEvidenceSchema = z.object({
+  path: z.string().min(1),
+  category: RepositoryFileCategorySchema,
+  sha: z.string().min(1),
+  content: z.string(),
+  truncated: z.boolean()
+});
+
+export type RepositoryFileEvidence = z.infer<typeof RepositoryFileEvidenceSchema>;
+
+export const RepositoryIssueEvidenceSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string().min(1),
+  state: z.literal("open"),
+  url: z.url(),
+  labels: z.array(z.string().min(1)),
+  isPullRequest: z.boolean()
+});
+
+export type RepositoryIssueEvidence = z.infer<typeof RepositoryIssueEvidenceSchema>;
+
+export const RepositoryScanSchema = z.object({
+  protocolVersion: z.literal(MANAGER_PROTOCOL_VERSION),
+  repositoryId: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
+  defaultBranch: z.string().min(1),
+  scannedAt: z.string().datetime(),
+  treeTruncated: z.boolean(),
+  filesTruncated: z.boolean(),
+  issuesTruncated: z.boolean(),
+  files: z.array(RepositoryFileEvidenceSchema),
+  issues: z.array(RepositoryIssueEvidenceSchema)
+});
+
+export type RepositoryScan = z.infer<typeof RepositoryScanSchema>;
+
 export const WorkerReportSchema = z.object({
   protocolVersion: z.string().min(1),
   workerId: z.string().regex(/^[^/\s]+$/),
@@ -51,7 +88,8 @@ export const WorkerReportSchema = z.object({
     summary: z.string().min(1),
     digest: z.string().min(1).optional()
   })),
-  protocolDecision: z.lazy(() => ProtocolDecisionSchema).optional()
+  protocolDecision: z.lazy(() => ProtocolDecisionSchema).optional(),
+  repositoryScan: RepositoryScanSchema.optional()
 });
 
 export type WorkerReport = z.infer<typeof WorkerReportSchema>;
@@ -291,6 +329,9 @@ export function recordCoordinationTaskReport(
   if (task.assignedWorkerId !== report.workerId) {
     throw new Error("Worker is not assigned to this Work Item.");
   }
+  if (task.kind !== "inspect_repository" && report.repositoryScan) {
+    throw new Error("Repository scans may only be attached to inspection Work Items.");
+  }
   if (report.outcome === "completed" && report.evidence.length === 0) {
     throw new Error("A completed Work Item report must include evidence.");
   }
@@ -301,6 +342,20 @@ export function recordCoordinationTaskReport(
   }
   if (task.kind === "unify_protocol" && report.outcome === "completed" && !report.protocolDecision) {
     throw new Error("A completed protocol-unification report must include a protocol decision.");
+  }
+  if (task.kind === "inspect_repository" && report.outcome === "completed" && !report.repositoryScan) {
+    throw new Error("A completed repository-inspection report must include a repository scan.");
+  }
+  if (task.kind === "inspect_repository" && report.repositoryScan) {
+    const snapshot = plan.repositorySnapshots.find(
+      (repository) => repository.id === task.repositoryId
+    );
+    if (
+      report.repositoryScan.repositoryId !== task.repositoryId ||
+      report.repositoryScan.defaultBranch !== snapshot?.defaultBranch
+    ) {
+      throw new Error("Repository scan does not match the planned repository snapshot.");
+    }
   }
   const status = report.outcome;
   const workItems = plan.workItems.map((candidate) =>

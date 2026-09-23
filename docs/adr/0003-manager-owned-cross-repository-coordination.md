@@ -23,6 +23,12 @@ write to a remote repository before the user has reviewed the work plan.
   dependency-free Work Items.
 - GitHub is an adapter behind the manager protocol. The first adapter is read-only and
   uses the authenticated `gh` CLI to describe repositories.
+- Inspection Work Items may invoke the adapter's read-only scan, which records selected
+  context/protocol/configuration files and open Issues or pull requests as evidence.
+  The scan prioritizes root context, ADRs, and protocol files, caps selected file
+  contents at a bounded size, and reports tree, file-selection, or issue-pagination
+  truncation instead of silently presenting partial evidence. It uses `gh api` because
+  the scan contract includes pull requests as well as Issues.
 - This phase does not write, commit, push, or merge remote changes. Workers return
   versioned reports with evidence and structured protocol decisions; later execution
   adapters may act only from confirmed Work Items.

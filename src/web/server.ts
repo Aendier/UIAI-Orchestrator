@@ -337,6 +337,26 @@ async function routeRequest(
     return;
   }
 
+  const scanWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/scan$/);
+  if (method === "POST" && scanWorkItemMatch) {
+    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
+    if (!context.github.scan) {
+      throw new HttpError(501, "The configured GitHub adapter does not support repository scans.");
+    }
+    sendJson(
+      response,
+      200,
+      await context.managerStore.scanRepositoryWorkItem(
+        decodePathSegment(scanWorkItemMatch[1]!),
+        decodePathSegment(scanWorkItemMatch[2]!),
+        input.workerId,
+        input.workerGeneration,
+        (repository) => context.github.scan!(repository)
+      )
+    );
+    return;
+  }
+
   const reportWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/report$/);
   if (method === "POST" && reportWorkItemMatch) {
     const report = WorkerReportSchema.parse(await readJsonBody(request));

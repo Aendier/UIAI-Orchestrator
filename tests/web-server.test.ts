@@ -95,6 +95,30 @@ describe("local workbench HTTP API", () => {
         provider: "github",
         url: "https://github.com/acme/client",
         defaultBranch: "main"
+      }),
+      scan: vi.fn().mockResolvedValue({
+        protocolVersion: "uiai-manager/v2",
+        repositoryId: "acme/client",
+        defaultBranch: "main",
+        scannedAt: "2026-09-23T00:03:00.000Z",
+        treeTruncated: false,
+        filesTruncated: false,
+        issuesTruncated: false,
+        files: [{
+          path: "CONTEXT.md",
+          category: "context",
+          sha: "sha-context",
+          content: "# Context\\nManager protocol",
+          truncated: false
+        }],
+        issues: [{
+          number: 12,
+          title: "Align protocol",
+          state: "open",
+          url: "https://github.com/acme/client/issues/12",
+          labels: ["ready-for-agent"],
+          isPullRequest: false
+        }]
       })
     };
     const app = await createWorkbenchServer({
@@ -139,21 +163,13 @@ describe("local workbench HTTP API", () => {
       { workerId: "worker-1", workerGeneration: worker.generation }
     );
     const reported = await postJson(
-      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/report`,
-      {
-        protocolVersion: "uiai-manager/v2",
-        workerId: "worker-1",
-        workerGeneration: worker.generation,
-        outcome: "completed",
-        summary: "已读取仓库协议",
-        changedFiles: [],
-        tests: ["context-present"],
-        blockers: [],
-        evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }]
-      }
+      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/scan`,
+      { workerId: "worker-1", workerGeneration: worker.generation }
     );
     expect(reported.status).toBe("in_progress");
     expect(github.describe).toHaveBeenCalledWith("acme/client");
+    expect(github.scan).toHaveBeenCalledWith(expect.objectContaining({ id: "acme/client" }));
+    expect(reported.workItems.find((task: { id: string }) => task.id === inspection.id).report.repositoryScan.repositoryId).toBe("acme/client");
   });
 
   it("accepts model settings in memory without exposing the API key", async () => {

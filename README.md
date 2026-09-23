@@ -31,6 +31,7 @@ The manager state is available at `GET /api/manager/state`. The write endpoints 
 - `POST /api/manager/workers/:workerId/claim?workerGeneration=...` to atomically claim the next compatible Work Item
 - `POST /api/manager/plans/:planId/work-items/:workItemId/assign` with `workerId` and `workerGeneration`
 - `POST /api/manager/plans/:planId/work-items/:workItemId/start` with `workerId` and `workerGeneration`
+- `POST /api/manager/plans/:planId/work-items/:workItemId/scan` with `workerId` and `workerGeneration` for a read-only GitHub repository scan
 - `POST /api/manager/plans/:planId/work-items/:workItemId/report`
 - `POST /api/manager/plans/:planId/work-items/:workItemId/retry`
 
@@ -38,6 +39,9 @@ Workers only communicate with the Manager. A completed `unify_protocol` Work Ite
 must return a structured `protocolDecision` containing its version, language-neutral
 contract schemas, compatibility rules, migration steps, and evidence. This phase produces proposals
 and evidence; it never writes, commits, pushes, or merges remote repositories.
+Repository scans use `gh api` so open pull requests are included alongside Issues;
+they retain at most 24 prioritized context/protocol/configuration files and report
+tree, file-selection, and issue pagination truncation in the scan evidence.
 Worker identity is trusted within the controlled local runtime; this Manager API is
 not a public remote authentication boundary.
 

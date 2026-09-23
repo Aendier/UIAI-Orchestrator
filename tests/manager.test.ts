@@ -84,7 +84,18 @@ describe("manager coordination protocol", () => {
       changedFiles: [],
       tests: ["context-present"],
       blockers: [],
-      evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }]
+      evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }],
+      repositoryScan: {
+        protocolVersion: MANAGER_PROTOCOL_VERSION,
+        repositoryId: "acme/client",
+        defaultBranch: "main",
+        scannedAt: "2026-09-23T00:02:00.000Z",
+        treeTruncated: false,
+        filesTruncated: false,
+        issuesTruncated: false,
+        files: [{ path: "CONTEXT.md", category: "context", sha: "sha-context", content: "# Context", truncated: false }],
+        issues: []
+      }
     }, "2026-09-23T00:02:00.000Z");
 
     expect(reported.workItems.find((task) => task.id === firstInspection!.id)?.status).toBe(
@@ -163,7 +174,18 @@ describe("manager coordination protocol", () => {
           changedFiles: [],
           tests: ["context-present"],
           blockers: [],
-          evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }]
+          evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }],
+          repositoryScan: {
+            protocolVersion: MANAGER_PROTOCOL_VERSION,
+            repositoryId: repository.id,
+            defaultBranch: repository.defaultBranch,
+            scannedAt: "2026-09-23T00:02:00.000Z",
+            treeTruncated: false,
+            filesTruncated: false,
+            issuesTruncated: false,
+            files: [{ path: "CONTEXT.md", category: "context", sha: "sha-context", content: "# Context", truncated: false }],
+            issues: []
+          }
         }
       );
     }
