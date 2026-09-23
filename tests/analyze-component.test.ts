@@ -214,4 +214,149 @@ describe("analyzeComponent", () => {
     }>;
     expect(visualContent.filter((part) => part.type === "image_url")).toHaveLength(2);
   });
+
+  it("uses the Responses API wire format when the provider requires it", async () => {
+    const responseBody = {
+      output: [
+        {
+          type: "reasoning"
+        },
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify(agreedProposal)
+            }
+          ]
+        }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const agents = createOpenAICompatibleAgents(
+      {
+        baseUrl: "https://models.example.test/v1",
+        apiKey: "test-key",
+        model: "ui-model",
+        wireApi: "responses"
+      },
+      fetchMock
+    );
+
+    await agents.structuralAgent.analyze(observation);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://models.example.test/v1/responses");
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      model: string;
+      instructions: string;
+      input: Array<{
+        role: string;
+        content: Array<{ type: string; text?: string }>;
+      }>;
+      text: { format: { type: string } };
+    };
+    expect(request).toMatchObject({
+      model: "ui-model",
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "Return only one JSON object." },
+            { type: "input_text" }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
+    expect(request.instructions).toContain("结构分析");
+    expect(request.instructions).toContain("confidence 必须是对象");
+    expect(JSON.stringify(request.input).toLowerCase()).toContain("json");
+  });
+
+  it("preserves image evidence in Responses API input", async () => {
+    const responseBody = {
+      output: [
+        {
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify(agreedProposal)
+            }
+          ]
+        }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const agents = createOpenAICompatibleAgents(
+      {
+        baseUrl: "https://models.example.test/v1",
+        apiKey: "test-key",
+        model: "ui-model",
+        wireApi: "responses"
+      },
+      fetchMock
+    );
+
+    await agents.visualAgent.analyze({
+      ...observation,
+      root: {
+        ...observation.root,
+        imageBase64: "root-image",
+        children: [
+          {
+            sourceId: "reward-label",
+            name: "Label",
+            nodeType: "TEXT",
+            visible: true,
+            imageBase64: "child-image",
+            children: []
+          }
+        ]
+      }
+    });
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      input: Array<{ content: Array<{ type: string; image_url?: string }> }>;
+    };
+    expect(request.input[0]?.content).toEqual(
+      expect.arrayContaining([
+        { type: "input_image", image_url: "data:image/png;base64,root-image" },
+        { type: "input_image", image_url: "data:image/png;base64,child-image" }
+      ])
+    );
+  });
+
+  it("accepts a top-level output_text from Responses-compatible providers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ output_text: JSON.stringify(agreedProposal) }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    const agents = createOpenAICompatibleAgents(
+      {
+        baseUrl: "https://models.example.test/v1",
+        apiKey: "test-key",
+        model: "ui-model",
+        wireApi: "responses"
+      },
+      fetchMock
+    );
+
+    await expect(agents.structuralAgent.analyze(observation)).resolves.toEqual(
+      agreedProposal
+    );
+  });
 });

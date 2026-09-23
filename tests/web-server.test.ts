@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -88,9 +88,23 @@ describe("local workbench HTTP API", () => {
 
   it("accepts model settings in memory without exposing the API key", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const modelFetch = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [{ type: "output_text", text: JSON.stringify(proposal) }]
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
     const app = await createWorkbenchServer({
       dataDirectory,
       fixturePath: resolve("fixtures/bridge-components.json"),
+      modelFetch,
       model: {
         baseUrl: "https://models.example.test/v1",
         apiKey: "",
@@ -106,7 +120,8 @@ describe("local workbench HTTP API", () => {
     await postJson(`${address}/api/model`, {
       baseUrl: "https://models.example.test/v1",
       apiKey: "session-secret",
-      model: "ui-model"
+      model: "ui-model",
+      wireApi: "responses"
     });
     const state = await getJson(`${address}/api/state`);
 
@@ -114,10 +129,119 @@ describe("local workbench HTTP API", () => {
       model: {
         ready: true,
         name: "ui-model",
-        baseUrl: "https://models.example.test/v1"
+        baseUrl: "https://models.example.test/v1",
+        wireApi: "responses",
+        source: "browser"
       }
     });
     expect(JSON.stringify(state)).not.toContain("session-secret");
+
+    await postJson(`${address}/api/analyze`, { sourceId: "guid-reward-claim" });
+
+    expect(modelFetch).toHaveBeenCalledTimes(2);
+    for (const [url, init] of modelFetch.mock.calls) {
+      expect(url).toBe("https://models.example.test/v1/responses");
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        "Bearer session-secret"
+      );
+      expect(JSON.parse(String(init?.body))).toMatchObject({ model: "ui-model" });
+    }
+  });
+
+  it("starts ready from Codex model configuration without exposing its key", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const homeDirectory = await mkdtemp(join(tmpdir(), "ui-ai-codex-home-"));
+    const codexDirectory = join(homeDirectory, ".codex");
+    await mkdir(codexDirectory);
+    await writeFile(
+      join(codexDirectory, "config.toml"),
+      [
+        'model_provider = "taishi"',
+        'model = "gpt-5.6-sol"',
+        "[model_providers.taishi]",
+        'base_url = "https://models.example.test/v1"',
+        'wire_api = "responses"'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(codexDirectory, "auth.json"),
+      JSON.stringify({ OPENAI_API_KEY: "codex-secret" }),
+      "utf8"
+    );
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      modelConfig: { homeDirectory, environment: {} }
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    const state = await getJson(`${address}/api/state`);
+
+    expect(state).toMatchObject({
+      model: {
+        ready: true,
+        name: "gpt-5.6-sol",
+        baseUrl: "https://models.example.test/v1",
+        wireApi: "responses",
+        source: "codex"
+      }
+    });
+    expect(JSON.stringify(state)).not.toContain("codex-secret");
+    expect(await readFile(join(dataDirectory, "workbench.json"), "utf8")).not.toContain(
+      "codex-secret"
+    );
+  });
+
+  it("supports a Codex provider that does not require authentication", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const homeDirectory = await mkdtemp(join(tmpdir(), "ui-ai-codex-home-"));
+    const codexDirectory = join(homeDirectory, ".codex");
+    await mkdir(codexDirectory);
+    await writeFile(
+      join(codexDirectory, "config.toml"),
+      [
+        'model_provider = "local"',
+        'model = "local-model"',
+        "[model_providers.local]",
+        'base_url = "http://127.0.0.1:9000/v1"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false"
+      ].join("\n"),
+      "utf8"
+    );
+    const modelFetch = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ output_text: JSON.stringify(proposal) }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      modelFetch,
+      modelConfig: { homeDirectory, environment: {} }
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    expect(await getJson(`${address}/api/state`)).toMatchObject({
+      model: { ready: true }
+    });
+    const analysisResponse = await fetch(`${address}/api/analyze`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId: "guid-reward-claim" })
+    });
+    const analysisBody = await analysisResponse.text();
+    expect(analysisResponse.status, analysisBody).toBe(200);
+
+    expect(modelFetch).toHaveBeenCalledTimes(2);
+    for (const [, init] of modelFetch.mock.calls) {
+      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+    }
   });
 
   it("rejects cross-site and non-JSON mutations", async () => {
@@ -149,6 +273,17 @@ describe("local workbench HTTP API", () => {
       })
     });
     expect(crossSite.status).toBe(403);
+
+    const unsupportedProtocol = await fetch(`${address}/api/model`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: "ftp://models.example.test/v1",
+        apiKey: "session-secret",
+        model: "ui-model"
+      })
+    });
+    expect(unsupportedProtocol.status).toBe(400);
   });
 
   it("does not let an in-flight analysis write a stale Draft after import", async () => {

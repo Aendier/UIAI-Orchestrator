@@ -7,7 +7,15 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
-import { createOpenAICompatibleAgents } from "../ai/openai-compatible.js";
+import {
+  createOpenAICompatibleAgents,
+  type ModelWireApi
+} from "../ai/openai-compatible.js";
+import {
+  loadModelConfig,
+  ModelBaseUrlSchema,
+  type ModelConfigOptions
+} from "../ai/model-config.js";
 import { adaptBridgeDocument } from "../bridge/index.js";
 import {
   ObservationDocumentSchema,
@@ -42,7 +50,14 @@ interface WorkbenchOptions {
   fixturePath?: string;
   publicDirectory?: string;
   agents?: AgentSet;
-  model?: { baseUrl: string; apiKey: string; name: string };
+  modelFetch?: typeof fetch;
+  model?: {
+    baseUrl: string;
+    apiKey: string;
+    name: string;
+    wireApi?: ModelWireApi;
+  };
+  modelConfig?: ModelConfigOptions;
 }
 
 export interface WorkbenchServer {
@@ -74,9 +89,10 @@ const ApproveRequestSchema = z.object({
 });
 const SearchRequestSchema = z.object({ query: z.string().min(1) });
 const ModelRequestSchema = z.object({
-  baseUrl: z.url(),
+  baseUrl: ModelBaseUrlSchema,
   apiKey: z.string().min(1),
-  model: z.string().min(1)
+  model: z.string().min(1),
+  wireApi: z.enum(["chat_completions", "responses"]).optional()
 });
 
 export async function createWorkbenchServer(
@@ -85,23 +101,36 @@ export async function createWorkbenchServer(
   const dataDirectory = resolve(options.dataDirectory ?? ".local");
   const fixturePath = resolve(options.fixturePath ?? "fixtures/bridge-components.json");
   const publicDirectory = resolve(options.publicDirectory ?? "public");
-  const model = options.model ?? {
-    baseUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
-    apiKey: process.env.OPENAI_API_KEY ?? "",
-    name: process.env.OPENAI_MODEL ?? "gpt-4.1-mini"
-  };
+  const loadedModel = options.model
+    ? {
+        baseUrl: options.model.baseUrl,
+        apiKey: options.model.apiKey,
+        model: options.model.name,
+        wireApi: options.model.wireApi ?? ("chat_completions" as const),
+        requiresAuth: true,
+        source: "options" as const
+      }
+    : await loadModelConfig(options.modelConfig);
   const agents =
     options.agents ??
-    (model.apiKey
+    (loadedModel.apiKey || !loadedModel.requiresAuth
       ? createOpenAICompatibleAgents({
-          baseUrl: model.baseUrl,
-          apiKey: model.apiKey,
-          model: model.name
-        })
+          baseUrl: loadedModel.baseUrl,
+          apiKey: loadedModel.apiKey,
+          model: loadedModel.model,
+          wireApi: loadedModel.wireApi
+        }, options.modelFetch)
       : undefined);
   const runtime = {
     agents,
-    model: { ready: agents !== undefined, name: model.name, baseUrl: model.baseUrl }
+    modelFetch: options.modelFetch,
+    model: {
+      ready: agents !== undefined,
+      name: loadedModel.model,
+      baseUrl: loadedModel.baseUrl,
+      wireApi: loadedModel.wireApi,
+      source: loadedModel.source
+    }
   };
   const store = new WorkbenchStore(dataDirectory, fixturePath);
   await store.initialize();
@@ -117,12 +146,20 @@ export async function createWorkbenchServer(
       const authenticationFailure =
         error instanceof Error && error.message.includes("HTTP 401");
       const status =
-        error instanceof HttpError ? error.status : authenticationFailure ? 502 : 500;
+        error instanceof HttpError
+          ? error.status
+          : authenticationFailure
+            ? 502
+            : error instanceof z.ZodError
+              ? 400
+              : 500;
       const message = authenticationFailure
         ? "模型服务认证失败，请打开模型设置检查地址、模型和密钥。"
-        : error instanceof Error
-          ? error.message
-          : "Unknown server error.";
+        : error instanceof z.ZodError
+          ? "Invalid request parameters."
+          : error instanceof Error
+            ? error.message
+            : "Unknown server error.";
       sendJson(response, status, { error: message });
     }
   });
@@ -159,7 +196,14 @@ async function routeRequest(
     publicDirectory: string;
     runtime: {
       agents: AgentSet | undefined;
-      model: { ready: boolean; name: string; baseUrl: string };
+      modelFetch: typeof fetch | undefined;
+      model: {
+        ready: boolean;
+        name: string;
+        baseUrl: string;
+        wireApi: ModelWireApi;
+        source: "browser" | "codex" | "default" | "environment" | "options";
+      };
     };
   }
 ): Promise<void> {
@@ -228,15 +272,19 @@ async function routeRequest(
 
   if (method === "POST" && path === "/api/model") {
     const input = ModelRequestSchema.parse(await readJsonBody(request));
+    const wireApi = input.wireApi ?? context.runtime.model.wireApi;
     context.runtime.agents = createOpenAICompatibleAgents({
       baseUrl: input.baseUrl,
       apiKey: input.apiKey,
-      model: input.model
-    });
+      model: input.model,
+      wireApi
+    }, context.runtime.modelFetch);
     context.runtime.model = {
       ready: true,
       name: input.model,
-      baseUrl: input.baseUrl
+      baseUrl: input.baseUrl,
+      wireApi,
+      source: "browser"
     };
     sendJson(response, 200, context.runtime.model);
     return;
@@ -503,7 +551,7 @@ async function run(): Promise<void> {
     : Number(process.env.PORT ?? 4317);
   try {
     const address = await app.listen(requestedPort);
-    console.log(`UI AI Component Registry: ${address}`);
+    console.log(`UIAI Orchestrator - Component Registry: ${address}`);
     if (process.argv.includes("--check")) {
       await app.close();
       console.log("Workbench launcher check passed.");
@@ -513,7 +561,7 @@ async function run(): Promise<void> {
   } catch (error: unknown) {
     if (isAddressInUse(error) && requestedPort === 4317) {
       const address = "http://127.0.0.1:4317";
-      console.log(`UI AI Component Registry already running: ${address}`);
+      console.log(`UIAI Orchestrator - Component Registry already running: ${address}`);
       if (process.env.UI_AI_NO_OPEN !== "1") openBrowser(address);
       return;
     }

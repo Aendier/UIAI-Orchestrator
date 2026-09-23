@@ -32,7 +32,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -206,7 +207,8 @@ label[for="import-file"] {
   font-size: 12px;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-width: 0;
   height: 40px;
@@ -218,7 +220,8 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.12);
 }

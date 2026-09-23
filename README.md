@@ -1,22 +1,24 @@
-# UI AI Component Registry
+# UIAI Orchestrator
 
-An auditable TypeScript MVP that adapts UnityFigmaBridge exports, uses independent AI
-roles to create semantic drafts, requires human approval, and searches only approved
-component knowledge.
+The orchestration and shared-protocol repository for an auditable image-to-Figma-to-Unity
+UI workflow. Its current MVP adapts UnityFigmaBridge exports, uses independent AI roles
+to create semantic drafts, requires human approval, and searches only approved component
+knowledge.
 
 ## Direct use
 
 Double-click `启动组件注册表.cmd`. The local workbench opens in the browser with the
-12 sample components already loaded. When launched from AIOA, it uses the model key
-from the current process without writing that key to disk. If the configured key does
-not match the service, click the model status in the top bar and enter the service URL,
-model name, and key in the browser. The key remains in memory only.
+12 sample components already loaded. It automatically loads the selected provider,
+model, wire API, and authentication from `~/.codex/config.toml` and
+`~/.codex/auth.json`. Complete `OPENAI_*` environment settings take precedence. Model
+credentials remain in server memory and are never returned to the browser or written
+to workbench data. The model dialog can still override settings for the current process.
 
 ## Requirements
 
 - Node.js 22 or newer
 - pnpm
-- An OpenAI-compatible chat completions endpoint for `analyze`
+- An OpenAI-compatible Responses or Chat Completions endpoint for `analyze`
 
 ## Setup
 
@@ -42,7 +44,7 @@ Analyze one observation with structural and visual roles:
 pnpm cli analyze --input observations.json --source-id guid-reward-claim --output draft.json
 ```
 
-Approve a reviewed Draft:
+Approve a reviewed Component Draft:
 
 ```powershell
 pnpm cli approve --draft draft.json --registry registry.json `

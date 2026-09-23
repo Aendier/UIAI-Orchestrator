@@ -1,36 +1,108 @@
-# UI AI Component Registry Context
+# UI AI Generation Context
 
 ## Purpose
 
-This system turns UI component facts from Figma and Unity into reviewed, searchable
-component knowledge. Its first objective is accurate component understanding, not UI
-generation or write-back.
+This system turns Unity-authored component facts and effect-image evidence into
+reviewed component knowledge and structured Figma pages. Unity owns Prefab internals;
+an Approved Page owns page composition.
 
 ## Core Flow
 
-1. A read-only Bridge Adapter converts source exports into observations.
-2. Independent structural and visual agents propose controlled semantics.
-3. An adjudicator resolves semantic type or role disagreements.
-4. The system stores the result as a Draft, never as approved knowledge.
-5. A human reviewer explicitly approves the Draft into the Registry.
-6. Search considers only approved Registry entries and explains its score.
+The page-generation and sync stages below describe the target workflow. The current
+MVP remains limited to read-only Bridge import, component analysis, human review, and
+Approved Registry search; ADR 0001 remains authoritative for the current write-back
+boundary.
 
-## Glossary
+1. People author Prefabs in Unity; UFB mirrors their Main Components and Instances into Figma.
+2. Independent agents propose controlled component semantics for human approval into the Registry.
+3. Agents interpret an Effect Image and optional Rough Figma Structure as a Page Draft.
+4. Matching reuses compatible Component Instances and leaves unsupported regions explicit.
+5. A human approves page composition before UFB converts it into a Unity sandbox artifact.
+6. Validation, correction, promotion, and component sync return changes to their responsible stage.
 
-- **Observation**: source facts extracted without semantic judgment.
-- **Proposal**: one analysis agent's semantic interpretation with confidence and evidence.
-- **Draft**: the combined analysis result. A Draft is untrusted until reviewed.
-- **Approved Component**: a human-approved Registry entry.
-- **Registry**: the collection of Approved Components available to downstream agents.
-- **Taxonomy**: the controlled semantic types, roles, and capabilities accepted by schemas.
-- **Bridge Adapter**: the read-only boundary for UnityFigmaBridge export data.
-- **Adjudicator**: the third analysis role invoked when independent proposals conflict.
+## Language
+
+**Observation**:
+Source facts extracted without semantic judgment.
+
+**Proposal**:
+One analysis agent's interpretation with field-level confidence and cited evidence.
+
+**Component Draft**:
+An untrusted semantic description of a component revision awaiting human review.
+_Avoid_: Draft when the component or page scope is unclear
+
+**Approved Component**:
+A human-approved Registry revision that may be considered for reuse.
+
+**Registry**:
+The independent store of Approved Components, semantic evidence, allowed Overrides, lifecycle state, and history.
+
+**Taxonomy**:
+The controlled semantic types, roles, capabilities, and states accepted by schemas.
+
+**UFB**:
+The deterministic Unity-Figma converter. It does not infer semantics, match components, or approve knowledge.
+_Avoid_: AI bridge, generator
+
+**Component Definition Page**:
+The Figma Page containing Main Components created or updated from Unity Prefabs by UFB.
+_Avoid_: Component Catalog Page, Generated Page
+
+**Component Catalog Page**:
+The Figma Page containing automatically arranged Instances of the Component Definition Page for inspection and evaluation.
+_Avoid_: Component Definition Page
+
+**Generated Page**:
+A Figma Page whose business UI is generated from an Effect Image and optional Rough Figma Structure.
+_Avoid_: Component Catalog Page
+
+**Effect Image**:
+The primary visual reference for a Generated Page.
+
+**Rough Figma Structure**:
+Optional, non-authoritative Figma nodes that provide grouping, text, naming, or geometry evidence and may be rebuilt.
+
+**Page Draft**:
+A mutable revision of Generated Page composition awaiting review.
+
+**Approved Page**:
+A reviewed Generated Page revision that is authoritative for page hierarchy, positions, component choices, Overrides, and ordinary nodes.
+
+**Component Revision**:
+A version of one Unity Prefab identity, tracked by stable prefabGuid plus Revision or content hash.
+
+**Change Manifest**:
+The machine-readable record of component additions, modifications, deletions, identities, revisions, and sync batch.
+
+**Promotion Candidate**:
+A repeated or human-marked ordinary structure proposed for manual creation as a Unity Prefab.
+
+**Allowed Override**:
+A Registry-approved Instance content slot, such as text, icon, quantity, or Variant, that a Generated Page may change.
+
+**Needs Revalidation**:
+The state of an Approved Page whose linked component revisions changed and whose visual and structural result awaits review.
+
+**Blocked Page**:
+A page preserved for inspection but prohibited from Unity publication because a required dependency has no valid replacement.
+
+**Deprecated Component**:
+A retired component retained for dependency discovery and migration but prohibited from new reuse.
+
+**Adjudicator**:
+The analysis role invoked only when independent proposals materially conflict.
 
 ## Invariants
 
 - Source adapters do not invent semantics.
 - Model output is validated against the Taxonomy at runtime.
+- Model credentials are never returned in browser state or Registry data; browser-entered
+  overrides are accepted only for the current process and are never persisted.
 - Private serialized fields and resource GUID payloads do not enter observations.
 - AI analysis cannot directly create an Approved Component.
 - Unknown requests may return `no_match`; search must not force a match.
-- Unity and Figma write-back are outside the MVP boundary.
+- Unity Prefabs are authoritative for component internals; Approved Pages are authoritative for page composition.
+- Changing an Approved Page's composition creates a new Page Draft.
+- Linked Component Instances may update through an atomic UFB sync and then require page revalidation.
+- AI may propose a Promotion Candidate but cannot publish it as a component.

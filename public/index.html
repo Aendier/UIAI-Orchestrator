@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UI Component Registry</title>
+    <title>UIAI Orchestrator - Component Registry</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">UI</span>
         <div>
-          <h1>Component Registry</h1>
+          <h1>UIAI Orchestrator</h1>
           <p>组件理解与审核工作台</p>
         </div>
       </div>
@@ -133,6 +133,13 @@
         <label>
           模型
           <input id="model-name" required value="gpt-4.1-mini" />
+        </label>
+        <label>
+          协议
+          <select id="model-wire-api" required>
+            <option value="responses">Responses API</option>
+            <option value="chat_completions">Chat Completions</option>
+          </select>
         </label>
         <label>
           API Key

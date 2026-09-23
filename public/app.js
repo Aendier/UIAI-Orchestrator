@@ -30,6 +30,7 @@ elements.modelDialog = document.querySelector("#model-dialog");
 elements.modelForm = document.querySelector("#model-form");
 elements.modelBaseUrl = document.querySelector("#model-base-url");
 elements.modelName = document.querySelector("#model-name");
+elements.modelWireApi = document.querySelector("#model-wire-api");
 elements.modelApiKey = document.querySelector("#model-api-key");
 elements.closeModelDialog = document.querySelector("#close-model-dialog");
 
@@ -42,6 +43,7 @@ elements.componentFilter.addEventListener("input", renderComponentList);
 elements.modelStatus.addEventListener("click", () => {
   elements.modelBaseUrl.value = state.model.baseUrl;
   elements.modelName.value = state.model.name;
+  elements.modelWireApi.value = state.model.wireApi;
   elements.modelApiKey.value = "";
   elements.modelDialog.showModal();
 });
@@ -53,6 +55,7 @@ elements.modelForm.addEventListener("submit", async (event) => {
     await api("/api/model", {
       baseUrl: elements.modelBaseUrl.value.trim(),
       model: elements.modelName.value.trim(),
+      wireApi: elements.modelWireApi.value,
       apiKey: elements.modelApiKey.value
     });
     elements.modelApiKey.value = "";

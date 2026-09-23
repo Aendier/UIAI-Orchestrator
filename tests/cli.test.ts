@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 describe("CLI", () => {
   it("adapts Bridge JSON into safe component observations", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "ui-ai-agent-"));
+    const outputDirectory = await mkdtemp(join(tmpdir(), "uiai-orchestrator-"));
     const outputPath = join(outputDirectory, "observations.json");
 
     await execFileAsync(
@@ -58,7 +58,7 @@ describe("CLI", () => {
   });
 
   it("requires explicit approval before natural-language registry search", async () => {
-    const outputDirectory = await mkdtemp(join(tmpdir(), "ui-ai-agent-"));
+    const outputDirectory = await mkdtemp(join(tmpdir(), "uiai-orchestrator-"));
     const registryPath = join(outputDirectory, "registry.json");
     const resultPath = join(outputDirectory, "search-result.json");
 
