@@ -21,6 +21,14 @@ const elements = {
   reviewer: document.querySelector("#reviewer"),
   useCases: document.querySelector("#use-cases"),
   visualTraits: document.querySelector("#visual-traits"),
+  managerRepositoryForm: document.querySelector("#manager-repository-form"),
+  managerRepositoryReference: document.querySelector("#manager-repository-reference"),
+  managerRepositories: document.querySelector("#manager-repositories"),
+  managerWorkers: document.querySelector("#manager-workers"),
+  managerPlanForm: document.querySelector("#manager-plan-form"),
+  managerPlanRequest: document.querySelector("#manager-plan-request"),
+  managerCreatePlan: document.querySelector("#manager-create-plan"),
+  managerPlans: document.querySelector("#manager-plans"),
   searchForm: document.querySelector("#search-form"),
   searchQuery: document.querySelector("#search-query"),
   searchResult: document.querySelector("#search-result"),
@@ -35,11 +43,36 @@ elements.modelApiKey = document.querySelector("#model-api-key");
 elements.closeModelDialog = document.querySelector("#close-model-dialog");
 
 let state;
+let managerState;
 let selectedSourceId;
+const selectedRepositories = new Set();
 
 await refreshState();
 
 elements.componentFilter.addEventListener("input", renderComponentList);
+elements.managerRepositoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withBusy(event.submitter, "Registering...", async () => {
+    await api("/api/manager/repositories", {
+      reference: elements.managerRepositoryReference.value.trim()
+    });
+    elements.managerRepositoryReference.value = "";
+    await refreshManagerState();
+    showToast("Repository registered with manager", false);
+  });
+});
+elements.managerPlanForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withBusy(event.submitter, "Planning...", async () => {
+    await api("/api/manager/plans", {
+      request: elements.managerPlanRequest.value.trim(),
+      repositoryIds: [...selectedRepositories]
+    });
+    elements.managerPlanRequest.value = "";
+    await refreshManagerState();
+    showToast("Coordination plan is awaiting confirmation", false);
+  });
+});
 elements.modelStatus.addEventListener("click", () => {
   elements.modelBaseUrl.value = state.model.baseUrl;
   elements.modelName.value = state.model.name;
@@ -130,16 +163,112 @@ elements.importFile.addEventListener("change", async () => {
 
 async function refreshState(selectFirst = true) {
   try {
-    state = await api("/api/state");
+    [state, managerState] = await Promise.all([
+      api("/api/state"),
+      api("/api/manager/state")
+    ]);
     renderModelStatus();
     if (selectFirst && !selectedSourceId) {
       selectedSourceId = state.observations.items[0]?.sourceId;
     }
     renderComponentList();
     renderDetail();
+    renderManager();
   } catch (error) {
     showToast(error.message, true);
   }
+}
+
+async function refreshManagerState() {
+  managerState = await api("/api/manager/state");
+  renderManager();
+}
+
+function renderManager() {
+  if (!managerState) return;
+  const registered = new Set(managerState.repositories.map((repository) => repository.id));
+  for (const repositoryId of [...selectedRepositories]) {
+    if (!registered.has(repositoryId)) selectedRepositories.delete(repositoryId);
+  }
+  elements.managerRepositories.replaceChildren(
+    ...managerState.repositories.map((repository) => {
+      const label = document.createElement("label");
+      label.className = "manager-repository";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedRepositories.has(repository.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedRepositories.add(repository.id);
+        else selectedRepositories.delete(repository.id);
+        renderManager();
+      });
+      const name = document.createElement("span");
+      name.textContent = repository.id;
+      const branch = document.createElement("small");
+      branch.textContent = repository.defaultBranch;
+      label.append(checkbox, name, branch);
+      return label;
+    })
+  );
+  elements.managerCreatePlan.disabled = selectedRepositories.size === 0;
+  elements.managerWorkers.replaceChildren(
+    ...managerState.workers.map((worker) => {
+      const row = document.createElement("div");
+      row.className = "manager-worker";
+      const name = document.createElement("strong");
+      name.textContent = worker.id;
+      const capabilities = document.createElement("small");
+      capabilities.textContent = worker.capabilities.join(", ");
+      row.append(name, capabilities);
+      return row;
+    })
+  );
+  elements.managerPlans.replaceChildren(
+    ...managerState.plans.map((plan) => {
+      const wrapper = document.createElement("article");
+      wrapper.className = "manager-plan";
+      const heading = document.createElement("div");
+      heading.className = "manager-plan-heading";
+      const title = document.createElement("strong");
+      title.textContent = plan.request;
+      const status = document.createElement("span");
+      status.className = "state-badge";
+      status.textContent = plan.status;
+      heading.append(title, status);
+      const meta = document.createElement("small");
+      meta.textContent = `${plan.repositoryIds.join(", ")} · ${plan.workItems.length} work items`;
+      wrapper.append(heading, meta);
+      if (plan.status === "awaiting_confirmation") {
+        const confirm = document.createElement("button");
+        confirm.type = "button";
+        confirm.className = "button primary manager-confirm";
+        confirm.textContent = "Confirm plan";
+        confirm.addEventListener("click", async () => {
+          await withBusy(confirm, "Confirming...", async () => {
+            await api(`/api/manager/plans/${encodeURIComponent(plan.id)}/confirm`, {
+              confirmedBy: "manager"
+            });
+            await refreshManagerState();
+          });
+        });
+        wrapper.append(confirm);
+      }
+      const tasks = document.createElement("div");
+      tasks.className = "manager-task-list";
+      for (const task of plan.workItems) {
+        const row = document.createElement("div");
+        row.className = "manager-task";
+        const taskName = document.createElement("span");
+        taskName.textContent = task.title;
+        const taskStatus = document.createElement("small");
+        taskStatus.textContent = task.status;
+        row.append(taskName, taskStatus);
+        tasks.append(row);
+      }
+      wrapper.append(tasks);
+      return wrapper;
+    })
+  );
 }
 
 function renderModelStatus() {

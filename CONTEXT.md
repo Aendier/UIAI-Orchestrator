@@ -93,6 +93,24 @@ A retired component retained for dependency discovery and migration but prohibit
 **Adjudicator**:
 The analysis role invoked only when independent proposals materially conflict.
 
+**Manager**:
+The sole coordination interface for cross-repository requests, protocol decisions, task assignment, and worker reports.
+
+**Repository Descriptor**:
+A manager-owned description of one GitHub repository, including its stable reference, default branch, and remote URL.
+
+**Coordination Plan**:
+A versioned, cross-repository work proposal that remains awaiting confirmation until the manager receives explicit approval.
+
+**Work Item**:
+A repository-scoped or manager-scoped task in a Coordination Plan with dependencies, write intent, and lifecycle status.
+
+**Worker Report**:
+A versioned result returned through the Manager for one Work Item, including worker identity, evidence, changed files, tests, and blockers.
+
+**Protocol Decision**:
+A versioned, structured contract decision with language-neutral schemas, compatibility rules, migration steps, and evidence, produced by the Manager's protocol-unification Work Item and consumed by repository-scoped proposals.
+
 ## Invariants
 
 - Source adapters do not invent semantics.
@@ -106,3 +124,7 @@ The analysis role invoked only when independent proposals materially conflict.
 - Changing an Approved Page's composition creates a new Page Draft.
 - Linked Component Instances may update through an atomic UFB sync and then require page revalidation.
 - AI may propose a Promotion Candidate but cannot publish it as a component.
+- Cross-repository changes are coordinated through the Manager and one versioned Coordination Plan.
+- A Coordination Plan cannot unlock write-intent Work Items until explicit manager confirmation.
+- Workers register capabilities, claim Work Items, and report results through the Manager; the Manager is the only cross-repository coordination interface.
+- A completed protocol-unification Work Item produces one structured, versioned Protocol Decision used by downstream proposals.

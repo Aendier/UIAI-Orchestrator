@@ -16,6 +16,10 @@ import {
   ModelBaseUrlSchema,
   type ModelConfigOptions
 } from "../ai/model-config.js";
+import {
+  createGitHubRepositoryAdapter,
+  type GitHubRepositoryAdapter
+} from "../github/repository.js";
 import { adaptBridgeDocument } from "../bridge/index.js";
 import {
   ObservationDocumentSchema,
@@ -31,6 +35,8 @@ import {
   type ComponentRegistry
 } from "../registry/index.js";
 import { SCHEMA_VERSION } from "../schema-version.js";
+import { WorkerReportSchema } from "../manager/protocol.js";
+import { ManagerStore, ManagerStoreError } from "../manager/store.js";
 import {
   analyzeComponent,
   SemanticDraftSchema,
@@ -51,6 +57,7 @@ interface WorkbenchOptions {
   publicDirectory?: string;
   agents?: AgentSet;
   modelFetch?: typeof fetch;
+  github?: GitHubRepositoryAdapter;
   model?: {
     baseUrl: string;
     apiKey: string;
@@ -94,6 +101,28 @@ const ModelRequestSchema = z.object({
   model: z.string().min(1),
   wireApi: z.enum(["chat_completions", "responses"]).optional()
 });
+const ManagerRepositoryRequestSchema = z.object({
+  reference: z.string().min(1)
+});
+const ManagerPlanRequestSchema = z.object({
+  request: z.string().min(1),
+  repositoryIds: z.array(z.string().min(1)).min(1).refine(
+    (repositoryIds) => new Set(repositoryIds).size === repositoryIds.length,
+    "repositoryIds must be unique"
+  )
+});
+const ManagerWorkerRequestSchema = z.object({
+  id: z.string().min(1),
+  capabilities: z.array(z.string().min(1)).min(1),
+  protocolVersion: z.string().min(1)
+});
+const ManagerActorRequestSchema = z.object({
+  confirmedBy: z.string().min(1).default("manager")
+});
+const ManagerWorkerActionRequestSchema = z.object({
+  workerId: z.string().min(1),
+  workerGeneration: z.string().min(1)
+});
 
 export async function createWorkbenchServer(
   options: WorkbenchOptions = {}
@@ -133,12 +162,16 @@ export async function createWorkbenchServer(
     }
   };
   const store = new WorkbenchStore(dataDirectory, fixturePath);
-  await store.initialize();
+  const managerStore = new ManagerStore(dataDirectory);
+  await Promise.all([store.initialize(), managerStore.initialize()]);
+  const github = options.github ?? createGitHubRepositoryAdapter();
 
   const server = createServer(async (request, response) => {
     try {
       await routeRequest(request, response, {
         store,
+        managerStore,
+        github,
         publicDirectory,
         runtime
       });
@@ -148,14 +181,18 @@ export async function createWorkbenchServer(
       const status =
         error instanceof HttpError
           ? error.status
-          : authenticationFailure
-            ? 502
-            : error instanceof z.ZodError
-              ? 400
-              : 500;
+          : error instanceof ManagerStoreError
+            ? error.status
+            : authenticationFailure
+              ? 502
+              : error instanceof z.ZodError
+                ? 400
+                : 500;
       const message = authenticationFailure
         ? "模型服务认证失败，请打开模型设置检查地址、模型和密钥。"
-        : error instanceof z.ZodError
+        : error instanceof ManagerStoreError
+          ? error.message
+          : error instanceof z.ZodError
           ? "Invalid request parameters."
           : error instanceof Error
             ? error.message
@@ -193,6 +230,8 @@ async function routeRequest(
   response: ServerResponse,
   context: {
     store: WorkbenchStore;
+    managerStore: ManagerStore;
+    github: GitHubRepositoryAdapter;
     publicDirectory: string;
     runtime: {
       agents: AgentSet | undefined;
@@ -211,6 +250,120 @@ async function routeRequest(
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
 
   if (method === "POST") assertTrustedMutation(request);
+
+  if (method === "GET" && path === "/api/manager/state") {
+    sendJson(response, 200, await context.managerStore.readState());
+    return;
+  }
+
+  if (method === "POST" && path === "/api/manager/repositories") {
+    const input = ManagerRepositoryRequestSchema.parse(await readJsonBody(request));
+    const repository = await context.github.describe(input.reference);
+    sendJson(response, 200, await context.managerStore.registerRepository(repository));
+    return;
+  }
+
+  if (method === "POST" && path === "/api/manager/workers") {
+    const input = ManagerWorkerRequestSchema.parse(await readJsonBody(request));
+    sendJson(response, 200, await context.managerStore.registerWorker(input));
+    return;
+  }
+
+  if (method === "POST" && path === "/api/manager/plans") {
+    const input = ManagerPlanRequestSchema.parse(await readJsonBody(request));
+    sendJson(
+      response,
+      200,
+      await context.managerStore.createPlan(input.request, input.repositoryIds)
+    );
+    return;
+  }
+
+  const confirmPlanMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/confirm$/);
+  if (method === "POST" && confirmPlanMatch) {
+    const input = ManagerActorRequestSchema.parse(await readJsonBody(request));
+    sendJson(
+      response,
+      200,
+      await context.managerStore.confirmPlan(
+        decodePathSegment(confirmPlanMatch[1]!),
+        input.confirmedBy
+      )
+    );
+    return;
+  }
+
+  const assignWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/assign$/);
+  if (method === "POST" && assignWorkItemMatch) {
+    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
+    sendJson(
+      response,
+      200,
+      await context.managerStore.assignTask(
+        decodePathSegment(assignWorkItemMatch[1]!),
+        decodePathSegment(assignWorkItemMatch[2]!),
+        input.workerId,
+        input.workerGeneration
+      )
+    );
+    return;
+  }
+
+  const claimWorkItemMatch = path.match(/^\/api\/manager\/workers\/([^/]+)\/claim$/);
+  if (method === "POST" && claimWorkItemMatch) {
+    const query = new URL(request.url ?? "/", "http://localhost").searchParams;
+    const claimed = await context.managerStore.claimNextTask(
+      decodePathSegment(claimWorkItemMatch[1]!),
+      z.string().min(1).parse(query.get("workerGeneration")),
+      query.get("planId") ?? undefined
+    );
+    sendJson(response, 200, claimed ?? { plan: null, taskId: null });
+    return;
+  }
+
+  const startWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/start$/);
+  if (method === "POST" && startWorkItemMatch) {
+    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
+    sendJson(
+      response,
+      200,
+      await context.managerStore.startTask(
+        decodePathSegment(startWorkItemMatch[1]!),
+        decodePathSegment(startWorkItemMatch[2]!),
+        input.workerId,
+        input.workerGeneration
+      )
+    );
+    return;
+  }
+
+  const reportWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/report$/);
+  if (method === "POST" && reportWorkItemMatch) {
+    const report = WorkerReportSchema.parse(await readJsonBody(request));
+    sendJson(
+      response,
+      200,
+      await context.managerStore.reportTask(
+        decodePathSegment(reportWorkItemMatch[1]!),
+        decodePathSegment(reportWorkItemMatch[2]!),
+        report
+      )
+    );
+    return;
+  }
+
+  const retryWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/retry$/);
+  if (method === "POST" && retryWorkItemMatch) {
+    sendJson(
+      response,
+      200,
+      await context.managerStore.retryTask(
+        decodePathSegment(retryWorkItemMatch[1]!),
+        decodePathSegment(retryWorkItemMatch[2]!)
+      )
+    );
+    return;
+  }
 
   if (method === "GET" && path === "/api/state") {
     const { observations, drafts, registry } = await context.store.readSnapshot();
@@ -510,6 +663,10 @@ function isMissingFile(error: unknown): boolean {
     "code" in error &&
     error.code === "ENOENT"
   );
+}
+
+function decodePathSegment(value: string): string {
+  return decodeURIComponent(value);
 }
 
 function countDescendants(node: ObservedNode): number {

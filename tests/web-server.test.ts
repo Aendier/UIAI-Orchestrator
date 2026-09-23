@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisAgent, SemanticAdjudicator } from "../src/semantic/index.js";
+import type { GitHubRepositoryAdapter } from "../src/github/repository.js";
 import { createWorkbenchServer } from "../src/web/server.js";
 
 const execFileAsync = promisify(execFile);
@@ -84,6 +85,75 @@ describe("local workbench HTTP API", () => {
       observations: { total: 12 },
       registry: { total: 0 }
     });
+  });
+
+  it("lets the manager register GitHub repositories and gate cross-repository work", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const github: GitHubRepositoryAdapter = {
+      describe: vi.fn().mockResolvedValue({
+        id: "acme/client",
+        provider: "github",
+        url: "https://github.com/acme/client",
+        defaultBranch: "main"
+      })
+    };
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      github
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    await postJson(`${address}/api/manager/repositories`, { reference: "acme/client" });
+    const plan = (await postJson(`${address}/api/manager/plans`, {
+      request: "统一客户端登录协议",
+      repositoryIds: ["acme/client"]
+    })) as {
+      id: string;
+      status: string;
+      workItems: Array<{ id: string; kind: string; status: string }>;
+    };
+    expect(plan.status).toBe("awaiting_confirmation");
+
+    const worker = (await postJson(`${address}/api/manager/workers`, {
+      id: "worker-1",
+      protocolVersion: "uiai-manager/v2",
+      capabilities: ["*"]
+    })) as { generation: string };
+
+    const approved = (await postJson(
+      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/confirm`,
+      { confirmedBy: "manager" }
+    )) as typeof plan;
+    const inspection = approved.workItems.find((task) => task.kind === "inspect_repository")!;
+    expect(inspection.status).toBe("ready");
+
+    const claimed = await postJson(
+      `${address}/api/manager/workers/worker-1/claim?planId=${encodeURIComponent(plan.id)}&workerGeneration=${encodeURIComponent(worker.generation)}`,
+      {}
+    );
+    expect(claimed.taskId).toBe(inspection.id);
+    await postJson(
+      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/start`,
+      { workerId: "worker-1", workerGeneration: worker.generation }
+    );
+    const reported = await postJson(
+      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/report`,
+      {
+        protocolVersion: "uiai-manager/v2",
+        workerId: "worker-1",
+        workerGeneration: worker.generation,
+        outcome: "completed",
+        summary: "已读取仓库协议",
+        changedFiles: [],
+        tests: ["context-present"],
+        blockers: [],
+        evidence: [{ path: "CONTEXT.md", summary: "Context loaded" }]
+      }
+    );
+    expect(reported.status).toBe("in_progress");
+    expect(github.describe).toHaveBeenCalledWith("acme/client");
   });
 
   it("accepts model settings in memory without exposing the API key", async () => {

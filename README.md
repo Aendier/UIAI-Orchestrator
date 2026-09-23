@@ -14,6 +14,33 @@ model, wire API, and authentication from `~/.codex/config.toml` and
 credentials remain in server memory and are never returned to the browser or written
 to workbench data. The model dialog can still override settings for the current process.
 
+## Manager-first collaboration
+
+The workbench exposes a Manager (`uiai-manager/v2`) for GitHub-based multi-repository coordination. Register
+repositories, create a Coordination Plan, and confirm it before any write-intent Work
+Item can become ready. This phase only reads repository metadata through the authenticated
+`gh` CLI and records worker reports; it does not write, commit, push, or merge remote
+changes.
+
+The manager state is available at `GET /api/manager/state`. The write endpoints are:
+
+- `POST /api/manager/repositories` with `{ "reference": "owner/repository" }`
+- `POST /api/manager/workers` with `{ "id": "worker-1", "protocolVersion": "uiai-manager/v2", "capabilities": ["*"] }`
+- `POST /api/manager/plans` with a request and registered repository IDs
+- `POST /api/manager/plans/:planId/confirm` with `{ "confirmedBy": "manager" }`
+- `POST /api/manager/workers/:workerId/claim?workerGeneration=...` to atomically claim the next compatible Work Item
+- `POST /api/manager/plans/:planId/work-items/:workItemId/assign` with `workerId` and `workerGeneration`
+- `POST /api/manager/plans/:planId/work-items/:workItemId/start` with `workerId` and `workerGeneration`
+- `POST /api/manager/plans/:planId/work-items/:workItemId/report`
+- `POST /api/manager/plans/:planId/work-items/:workItemId/retry`
+
+Workers only communicate with the Manager. A completed `unify_protocol` Work Item
+must return a structured `protocolDecision` containing its version, language-neutral
+contract schemas, compatibility rules, migration steps, and evidence. This phase produces proposals
+and evidence; it never writes, commits, pushes, or merges remote repositories.
+Worker identity is trusted within the controlled local runtime; this Manager API is
+not a public remote authentication boundary.
+
 ## Requirements
 
 - Node.js 22 or newer
