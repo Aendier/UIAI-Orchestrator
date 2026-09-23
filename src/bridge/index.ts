@@ -59,6 +59,7 @@ const BridgeNodeSchema = z
         imageBase64: z.string().optional()
       })
       .optional(),
+    screenshot: z.string().optional(),
     get children() {
       return z.array(BridgeNodeSchema).default([]);
     }
@@ -139,9 +140,11 @@ function adaptNode(node: BridgeNode, sourcePath: string): ObservedNode {
             ...(style.fillType ? { fillType: style.fillType } : {})
           }
         }),
-    ...(node.layout?.imageBase64 === undefined
-      ? {}
-      : { imageBase64: node.layout.imageBase64 }),
+    ...(node.layout?.imageBase64
+      ? { imageBase64: node.layout.imageBase64 }
+      : node.screenshot
+        ? { imageBase64: node.screenshot }
+        : {}),
     children: node.children.map((child, index) =>
       adaptNode(child, `${sourcePath}.children[${index}]`)
     )

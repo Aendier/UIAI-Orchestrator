@@ -557,6 +557,20 @@ textarea:focus {
   background: #e3f0fb;
 }
 
+.component-preview {
+  margin: 16px 0 0;
+  padding: 12px;
+  display: grid;
+  place-items: center;
+  background: #f4f7f5;
+  border: 1px solid var(--line);
+}
+
+.component-preview img {
+  max-width: 100%;
+  max-height: 280px;
+}
+
 .facts-list {
   margin: 0;
 }

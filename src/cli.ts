@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { createOpenAICompatibleAgents } from "./ai/openai-compatible.js";
 import { adaptBridgeDocument } from "./bridge/index.js";
@@ -13,6 +13,7 @@ import {
   searchRegistry
 } from "./registry/index.js";
 import { SCHEMA_VERSION } from "./schema-version.js";
+import { createSharedProtocol } from "./protocol/index.js";
 import { analyzeComponent } from "./semantic/index.js";
 
 async function main(argv: string[]): Promise<void> {
@@ -30,9 +31,12 @@ async function main(argv: string[]): Promise<void> {
     case "search":
       await searchCommand(args);
       return;
+    case "export-protocol":
+      await writeJson(requiredOption(args, "--output"), createSharedProtocol());
+      return;
     default:
       throw new Error(
-        "Usage: ui-ai <adapt|analyze|approve|search> [options]"
+        "Usage: ui-ai <adapt|analyze|approve|search|export-protocol> [options]"
       );
   }
 }
@@ -111,7 +115,9 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
-  await writeFile(resolve(path), `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const output = resolve(path);
+  await mkdir(dirname(output), { recursive: true });
+  await writeFile(output, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 async function readRegistry(path: string): Promise<unknown> {

@@ -9,6 +9,8 @@ const elements = {
   detailName: document.querySelector("#detail-name"),
   detailState: document.querySelector("#detail-state"),
   factsList: document.querySelector("#facts-list"),
+  componentPreview: document.querySelector("#component-preview"),
+  componentPreviewImage: document.querySelector("#component-preview-image"),
   analyzeButton: document.querySelector("#analyze-button"),
   analysisNote: document.querySelector("#analysis-note"),
   draftEmpty: document.querySelector("#draft-empty"),
@@ -325,6 +327,15 @@ function renderDetail() {
   const status = item.approved ? "Approved" : item.draft ? "Draft" : "Observed";
   elements.detailState.textContent = status;
   elements.detailState.className = `state-badge ${status.toLocaleLowerCase()}`;
+  elements.componentPreview.hidden = !item.hasPreview;
+  if (item.hasPreview) {
+    elements.componentPreviewImage.alt = item.name;
+    elements.componentPreviewImage.src =
+      `/api/observations/${encodeURIComponent(item.sourceId)}/preview`;
+  } else {
+    elements.componentPreviewImage.alt = "";
+    elements.componentPreviewImage.removeAttribute("src");
+  }
   elements.factsList.replaceChildren(
     fact("Source ID", item.sourceId),
     fact("Node Type", item.nodeType),

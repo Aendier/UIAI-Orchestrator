@@ -1,0 +1,1101 @@
+{
+  "version": "uiai-protocol/v1",
+  "name": "uiai-component",
+  "contracts": [
+    {
+      "name": "componentObservation",
+      "format": "json-schema",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "unity-figma-bridge"
+              },
+              "documentName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              }
+            },
+            "required": [
+              "kind",
+              "documentName"
+            ],
+            "additionalProperties": false
+          },
+          "root": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "source",
+          "root"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "object",
+            "properties": {
+              "sourceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "nodeType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "componentRef": {
+                "type": "object",
+                "properties": {
+                  "prefabGuid": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prefabPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scriptType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "componentTypes": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "isNested": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "componentTypes"
+                ],
+                "additionalProperties": false
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "rotation": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height",
+                  "rotation"
+                ],
+                "additionalProperties": false
+              },
+              "text": {
+                "type": "object",
+                "properties": {
+                  "characters": {
+                    "type": "string"
+                  },
+                  "fontFamily": {
+                    "type": "string"
+                  },
+                  "fontStyle": {
+                    "type": "string"
+                  },
+                  "fontSize": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "characters"
+                ],
+                "additionalProperties": false
+              },
+              "style": {
+                "type": "object",
+                "properties": {
+                  "backgroundColor": {
+                    "type": "string"
+                  },
+                  "backgroundOpacity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fillType": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "imageBase64": {
+                "type": "string"
+              },
+              "children": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            },
+            "required": [
+              "sourceId",
+              "name",
+              "nodeType",
+              "visible",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "name": "observationDocument",
+      "format": "json-schema",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "unity-figma-bridge"
+                    },
+                    "documentName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "documentName"
+                  ],
+                  "additionalProperties": false
+                },
+                "root": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "source",
+                "root"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "observations"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "object",
+            "properties": {
+              "sourceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "nodeType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "visible": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "componentRef": {
+                "type": "object",
+                "properties": {
+                  "prefabGuid": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prefabPath": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scriptType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "componentTypes": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "isNested": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "componentTypes"
+                ],
+                "additionalProperties": false
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "rotation": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height",
+                  "rotation"
+                ],
+                "additionalProperties": false
+              },
+              "text": {
+                "type": "object",
+                "properties": {
+                  "characters": {
+                    "type": "string"
+                  },
+                  "fontFamily": {
+                    "type": "string"
+                  },
+                  "fontStyle": {
+                    "type": "string"
+                  },
+                  "fontSize": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "characters"
+                ],
+                "additionalProperties": false
+              },
+              "style": {
+                "type": "object",
+                "properties": {
+                  "backgroundColor": {
+                    "type": "string"
+                  },
+                  "backgroundOpacity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fillType": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "imageBase64": {
+                "type": "string"
+              },
+              "children": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            },
+            "required": [
+              "sourceId",
+              "name",
+              "nodeType",
+              "visible",
+              "children"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "name": "semanticDraft",
+      "format": "json-schema",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "proposals": {
+            "type": "object",
+            "properties": {
+              "structural": {
+                "type": "object",
+                "properties": {
+                  "semanticType": {
+                    "type": "string",
+                    "enum": [
+                      "button",
+                      "item",
+                      "navigation",
+                      "container",
+                      "text",
+                      "image",
+                      "progress",
+                      "unknown"
+                    ]
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reward.claim",
+                      "reward.display",
+                      "common.close",
+                      "navigation.tab",
+                      "primary.action",
+                      "shop.purchase",
+                      "content.header",
+                      "progress.display",
+                      "generic",
+                      "unknown"
+                    ]
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "click",
+                        "text",
+                        "image",
+                        "disabled.state",
+                        "selected.state",
+                        "display.icon",
+                        "display.quantity",
+                        "display.rarity",
+                        "display.progress",
+                        "navigation.select",
+                        "container.children"
+                      ]
+                    }
+                  },
+                  "confidence": {
+                    "type": "object",
+                    "properties": {
+                      "semanticType": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "role": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "capabilities": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "semanticType",
+                      "role",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "evidence": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourcePath": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "value": {},
+                        "rationale": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sourcePath",
+                        "value",
+                        "rationale"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "semanticType",
+                  "role",
+                  "capabilities",
+                  "confidence",
+                  "evidence",
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
+              "visual": {
+                "type": "object",
+                "properties": {
+                  "semanticType": {
+                    "type": "string",
+                    "enum": [
+                      "button",
+                      "item",
+                      "navigation",
+                      "container",
+                      "text",
+                      "image",
+                      "progress",
+                      "unknown"
+                    ]
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reward.claim",
+                      "reward.display",
+                      "common.close",
+                      "navigation.tab",
+                      "primary.action",
+                      "shop.purchase",
+                      "content.header",
+                      "progress.display",
+                      "generic",
+                      "unknown"
+                    ]
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "click",
+                        "text",
+                        "image",
+                        "disabled.state",
+                        "selected.state",
+                        "display.icon",
+                        "display.quantity",
+                        "display.rarity",
+                        "display.progress",
+                        "navigation.select",
+                        "container.children"
+                      ]
+                    }
+                  },
+                  "confidence": {
+                    "type": "object",
+                    "properties": {
+                      "semanticType": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "role": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "capabilities": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "semanticType",
+                      "role",
+                      "capabilities"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "evidence": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourcePath": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "value": {},
+                        "rationale": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sourcePath",
+                        "value",
+                        "rationale"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "semanticType",
+                  "role",
+                  "capabilities",
+                  "confidence",
+                  "evidence",
+                  "summary"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "structural",
+              "visual"
+            ],
+            "additionalProperties": false
+          },
+          "decision": {
+            "type": "object",
+            "properties": {
+              "semanticType": {
+                "type": "string",
+                "enum": [
+                  "button",
+                  "item",
+                  "navigation",
+                  "container",
+                  "text",
+                  "image",
+                  "progress",
+                  "unknown"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "reward.claim",
+                  "reward.display",
+                  "common.close",
+                  "navigation.tab",
+                  "primary.action",
+                  "shop.purchase",
+                  "content.header",
+                  "progress.display",
+                  "generic",
+                  "unknown"
+                ]
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "click",
+                    "text",
+                    "image",
+                    "disabled.state",
+                    "selected.state",
+                    "display.icon",
+                    "display.quantity",
+                    "display.rarity",
+                    "display.progress",
+                    "navigation.select",
+                    "container.children"
+                  ]
+                }
+              },
+              "confidence": {
+                "type": "object",
+                "properties": {
+                  "semanticType": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "role": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "capabilities": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "semanticType",
+                  "role",
+                  "capabilities"
+                ],
+                "additionalProperties": false
+              },
+              "evidence": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourcePath": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {},
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "sourcePath",
+                    "value",
+                    "rationale"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "needs_review"
+                ]
+              }
+            },
+            "required": [
+              "semanticType",
+              "role",
+              "capabilities",
+              "confidence",
+              "evidence",
+              "summary",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "sourceId",
+          "name",
+          "proposals",
+          "decision",
+          "conflicts"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "approvedComponent",
+      "format": "json-schema",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "const": "approved"
+          },
+          "semanticType": {
+            "type": "string",
+            "enum": [
+              "button",
+              "item",
+              "navigation",
+              "container",
+              "text",
+              "image",
+              "progress",
+              "unknown"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "reward.claim",
+              "reward.display",
+              "common.close",
+              "navigation.tab",
+              "primary.action",
+              "shop.purchase",
+              "content.header",
+              "progress.display",
+              "generic",
+              "unknown"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "click",
+                "text",
+                "image",
+                "disabled.state",
+                "selected.state",
+                "display.icon",
+                "display.quantity",
+                "display.rarity",
+                "display.progress",
+                "navigation.select",
+                "container.children"
+              ]
+            }
+          },
+          "useCases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "visualTraits": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourcePath": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {},
+                "rationale": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "sourcePath",
+                "value",
+                "rationale"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "approvedBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "id",
+          "sourceId",
+          "name",
+          "status",
+          "semanticType",
+          "role",
+          "capabilities",
+          "useCases",
+          "visualTraits",
+          "evidence",
+          "approvedBy",
+          "approvedAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "componentRegistry",
+      "format": "json-schema",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "const": "approved"
+                },
+                "semanticType": {
+                  "type": "string",
+                  "enum": [
+                    "button",
+                    "item",
+                    "navigation",
+                    "container",
+                    "text",
+                    "image",
+                    "progress",
+                    "unknown"
+                  ]
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "reward.claim",
+                    "reward.display",
+                    "common.close",
+                    "navigation.tab",
+                    "primary.action",
+                    "shop.purchase",
+                    "content.header",
+                    "progress.display",
+                    "generic",
+                    "unknown"
+                  ]
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "click",
+                      "text",
+                      "image",
+                      "disabled.state",
+                      "selected.state",
+                      "display.icon",
+                      "display.quantity",
+                      "display.rarity",
+                      "display.progress",
+                      "navigation.select",
+                      "container.children"
+                    ]
+                  }
+                },
+                "useCases": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "visualTraits": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourcePath": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {},
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "sourcePath",
+                      "value",
+                      "rationale"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "approvedBy": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "approvedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "id",
+                "sourceId",
+                "name",
+                "status",
+                "semanticType",
+                "role",
+                "capabilities",
+                "useCases",
+                "visualTraits",
+                "evidence",
+                "approvedBy",
+                "approvedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "components"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

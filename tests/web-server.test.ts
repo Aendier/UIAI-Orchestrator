@@ -433,6 +433,110 @@ describe("local workbench HTTP API", () => {
       expect(stdout).toContain("Workbench launcher check passed.");
     }
   );
+
+  it("reports a component preview without embedding the screenshot in state", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    await postJson(`${address}/api/import`, {
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      nodes: [
+        {
+          name: "RewardClaimButton",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-with-preview" },
+          screenshot: png
+        },
+        {
+          name: "PlainButton",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-without-preview" }
+        }
+      ]
+    });
+
+    const state = (await getJson(`${address}/api/state`)) as {
+      observations: { items: Array<{ sourceId: string; hasPreview?: boolean }> };
+    };
+    expect(JSON.stringify(state)).not.toContain(png);
+    expect(state.observations.items).toEqual([
+      expect.objectContaining({ sourceId: "guid-with-preview", hasPreview: true }),
+      expect.objectContaining({ sourceId: "guid-without-preview", hasPreview: false })
+    ]);
+  });
+
+  it("serves a component screenshot as PNG", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    await postJson(`${address}/api/import`, {
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      nodes: [
+        {
+          name: "RewardClaimButton",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-with-preview" },
+          screenshot: png
+        },
+        {
+          name: "PlainButton",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-without-preview" }
+        }
+      ]
+    });
+
+    const response = await fetch(`${address}/api/observations/guid-with-preview/preview`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(png, "base64"));
+
+    const missing = await fetch(`${address}/api/observations/guid-without-preview/preview`);
+    expect(missing.status).toBe(404);
+  });
+
+  it("rejects a component preview that is not a PNG", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json")
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    await postJson(`${address}/api/import`, {
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      nodes: [
+        {
+          name: "RewardClaimButton",
+          type: "COMPONENT",
+          u2f: { prefabGuid: "guid-bad-preview" },
+          screenshot: "aGVsbG8="
+        }
+      ]
+    });
+
+    const response = await fetch(`${address}/api/observations/guid-bad-preview/preview`);
+    expect(response.status).toBe(415);
+  });
 });
 
 async function getJson(url: string): Promise<unknown> {

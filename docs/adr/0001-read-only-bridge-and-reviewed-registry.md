@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. ADR 0005 extends the accepted import with one UFB Main Component screenshot.
+This ADR still prohibits this repository from writing Unity or Figma.
 
 ## Context
 

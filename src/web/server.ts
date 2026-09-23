@@ -402,12 +402,30 @@ async function routeRequest(
           componentRef: observation.root.componentRef,
           bounds: observation.root.bounds,
           childCount: countDescendants(observation.root),
+          hasPreview: Boolean(observation.root.imageBase64),
           draft: draftBySource.get(observation.root.sourceId),
           approved: approvedBySource.get(observation.root.sourceId)
         }))
       },
       registry: { total: registry.components.length, components: registry.components }
     });
+    return;
+  }
+
+  const previewMatch = path.match(/^\/api\/observations\/([^/]+)\/preview$/);
+  if (method === "GET" && previewMatch) {
+    const sourceId = decodePathSegment(previewMatch[1]!);
+    const { observations } = await context.store.readSnapshot();
+    const image = observations.observations.find(
+      (item) => item.root.sourceId === sourceId
+    )?.root.imageBase64;
+    if (!image) throw new HttpError(404, "这个组件没有预览。");
+    const bytes = decodePng(image);
+    response.writeHead(200, {
+      "content-type": "image/png",
+      "cache-control": "no-store"
+    });
+    response.end(bytes);
     return;
   }
 
@@ -669,6 +687,18 @@ async function writeJsonFile(path: string, value: unknown): Promise<void> {
     await unlink(temporaryPath).catch(() => undefined);
     throw error;
   }
+}
+
+function decodePng(imageBase64: string): Buffer {
+  const bytes = Buffer.from(imageBase64, "base64");
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (
+    bytes.length < signature.length ||
+    !bytes.subarray(0, signature.length).equals(signature)
+  ) {
+    throw new HttpError(415, "预览必须是 PNG。");
+  }
+  return bytes;
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {

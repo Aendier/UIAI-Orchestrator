@@ -9,9 +9,10 @@ an Approved Page owns page composition.
 ## Core Flow
 
 The page-generation and sync stages below describe the target workflow. The current
-MVP remains limited to read-only Bridge import, component analysis, human review, and
-Approved Registry search; ADR 0001 remains authoritative for the current write-back
-boundary.
+MVP imports each UFB Main Component as structure plus one stable screenshot, then runs
+component analysis, human review, and Approved Registry search. This repository does not
+write Figma or Unity. ADR 0001 remains authoritative for that write-back boundary, and
+ADR 0005 records the import scope.
 
 1. People author Prefabs in Unity; UFB mirrors their Main Components and Instances into Figma.
 2. Independent agents propose controlled component semantics for human approval into the Registry.
@@ -23,7 +24,9 @@ boundary.
 ## Language
 
 **Observation**:
-Source facts extracted without semantic judgment.
+Source facts extracted without semantic judgment. A Main Component observation may
+include one stable screenshot produced by UFB; that screenshot is evidence, not a
+semantic judgment.
 
 **Proposal**:
 One analysis agent's interpretation with field-level confidence and cited evidence.
@@ -117,6 +120,7 @@ A read-only snapshot of prioritized repository context, protocol/configuration f
 ## Invariants
 
 - Source adapters do not invent semantics.
+- This repository imports UFB Main Component structure and screenshots. It does not publish to Figma or write back to Unity.
 - Model output is validated against the Taxonomy at runtime.
 - Model credentials are never returned in browser state or Registry data; browser-entered
   overrides are accepted only for the current process and are never persisted.
@@ -131,3 +135,5 @@ A read-only snapshot of prioritized repository context, protocol/configuration f
 - A Coordination Plan cannot unlock write-intent Work Items until explicit manager confirmation.
 - Workers register capabilities, claim Work Items, and report results through the Manager; the Manager is the only cross-repository coordination interface.
 - A completed protocol-unification Work Item produces one structured, versioned Protocol Decision used by downstream proposals.
+- Component observations, semantic drafts, and approved components are shared through `protocol/uiai-component.json`. Consumers do not need the Manager to read or validate them.
+- New product functionality is implemented by one agent against that shared protocol, not by adding Manager workers or coordination plans.

@@ -1,9 +1,20 @@
 # UIAI Orchestrator
 
 The orchestration and shared-protocol repository for an auditable image-to-Figma-to-Unity
-UI workflow. Its current MVP adapts UnityFigmaBridge exports, uses independent AI roles
+UI workflow. Its current MVP adapts UnityFigmaBridge exports, including each Main
+Component screenshot, and uses independent AI roles
 to create semantic drafts, requires human approval, and searches only approved component
 knowledge.
+
+## Shared protocol
+
+Other repositories use the component data structures without the Manager. The published contract is [`protocol/uiai-component.json`](protocol/uiai-component.json) (`uiai-protocol/v1`). It contains JSON Schema for a component observation, an observation document, a semantic draft, an approved component, and the component registry. TypeScript callers can import the same schemas from `uiai-orchestrator/protocol`.
+
+Regenerate the file with:
+
+```powershell
+pnpm cli export-protocol --output protocol/uiai-component.json
+```
 
 ## Direct use
 
