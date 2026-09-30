@@ -8,7 +8,7 @@ knowledge.
 
 ## Shared protocol
 
-Other repositories use the component data structures without the Manager. The published contract is [`protocol/uiai-component.json`](protocol/uiai-component.json) (`uiai-protocol/v1`). It contains JSON Schema for a component observation, an observation document, a semantic draft, an approved component, and the component registry. TypeScript callers can import the same schemas from `uiai-orchestrator/protocol`.
+Other repositories use the published component contract: [`protocol/uiai-component.json`](protocol/uiai-component.json) (`uiai-protocol/v1`). It contains JSON Schema for a component observation, an observation document, a semantic draft, an approved component, and the component registry. TypeScript callers can import the same schemas from `uiai-orchestrator/protocol`.
 
 Regenerate the file with:
 
@@ -24,37 +24,6 @@ model, wire API, and authentication from `~/.codex/config.toml` and
 `~/.codex/auth.json`. Complete `OPENAI_*` environment settings take precedence. Model
 credentials remain in server memory and are never returned to the browser or written
 to workbench data. The model dialog can still override settings for the current process.
-
-## Manager-first collaboration
-
-The workbench exposes a Manager (`uiai-manager/v2`) for GitHub-based multi-repository coordination. Register
-repositories, create a Coordination Plan, and confirm it before any write-intent Work
-Item can become ready. This phase only reads repository metadata through the authenticated
-`gh` CLI and records worker reports; it does not write, commit, push, or merge remote
-changes.
-
-The manager state is available at `GET /api/manager/state`. The write endpoints are:
-
-- `POST /api/manager/repositories` with `{ "reference": "owner/repository" }`
-- `POST /api/manager/workers` with `{ "id": "worker-1", "protocolVersion": "uiai-manager/v2", "capabilities": ["*"] }`
-- `POST /api/manager/plans` with a request and registered repository IDs
-- `POST /api/manager/plans/:planId/confirm` with `{ "confirmedBy": "manager" }`
-- `POST /api/manager/workers/:workerId/claim?workerGeneration=...` to atomically claim the next compatible Work Item
-- `POST /api/manager/plans/:planId/work-items/:workItemId/assign` with `workerId` and `workerGeneration`
-- `POST /api/manager/plans/:planId/work-items/:workItemId/start` with `workerId` and `workerGeneration`
-- `POST /api/manager/plans/:planId/work-items/:workItemId/scan` with `workerId` and `workerGeneration` for a read-only GitHub repository scan
-- `POST /api/manager/plans/:planId/work-items/:workItemId/report`
-- `POST /api/manager/plans/:planId/work-items/:workItemId/retry`
-
-Workers only communicate with the Manager. A completed `unify_protocol` Work Item
-must return a structured `protocolDecision` containing its version, language-neutral
-contract schemas, compatibility rules, migration steps, and evidence. This phase produces proposals
-and evidence; it never writes, commits, pushes, or merges remote repositories.
-Repository scans use `gh api` so open pull requests are included alongside Issues;
-they retain at most 24 prioritized context/protocol/configuration files and report
-tree, file-selection, and issue pagination truncation in the scan evidence.
-Worker identity is trusted within the controlled local runtime; this Manager API is
-not a public remote authentication boundary.
 
 ## Requirements
 
@@ -81,6 +50,7 @@ pnpm cli adapt --input fixtures/bridge-components.json --output observations.jso
 ```
 
 `POST /api/import` replaces the workbench library and clears review results. `POST /api/sync` accepts the same Bridge `0.1.0` document, updates Observations by `prefabGuid`, and keeps existing Drafts and Registry entries. See [ADR 0006](docs/adr/0006-sync-components-by-prefab-guid.md).
+The workbench sidebar also pulls one object from the local Unity `GET /export?objectName=` endpoint and feeds it through the same incremental sync path.
 
 Analyze one observation with structural and visual roles:
 

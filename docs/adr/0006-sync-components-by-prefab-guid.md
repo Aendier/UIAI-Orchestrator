@@ -14,6 +14,7 @@ Accepted
 - Every root component must have a unique `prefabGuid` that does not contain `/`. That guid is the Observation `sourceId`.
 - A matching `sourceId` replaces that Observation. A new `prefabGuid` adds one. Observations absent from the document stay.
 - Sync does not clear Drafts or the Registry. `POST /api/import` still replaces the library and clears both.
+- `POST /api/sync/unity` is only the workbench's local Unity pull entry point; it fetches one Bridge export and delegates to the same sync operation.
 - This repository still does not write Figma or Unity.
 
 ## Consequences

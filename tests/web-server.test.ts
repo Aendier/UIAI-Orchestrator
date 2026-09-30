@@ -7,7 +7,6 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AnalysisAgent, SemanticAdjudicator } from "../src/semantic/index.js";
-import type { GitHubRepositoryAdapter } from "../src/github/repository.js";
 import { createWorkbenchServer } from "../src/web/server.js";
 
 const execFileAsync = promisify(execFile);
@@ -90,89 +89,17 @@ describe("local workbench HTTP API", () => {
     });
   });
 
-  it("lets the manager register GitHub repositories and gate cross-repository work", async () => {
+  it("does not expose the retired manager API", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
-    const github: GitHubRepositoryAdapter = {
-      describe: vi.fn().mockResolvedValue({
-        id: "acme/client",
-        provider: "github",
-        url: "https://github.com/acme/client",
-        defaultBranch: "main"
-      }),
-      scan: vi.fn().mockResolvedValue({
-        protocolVersion: "uiai-manager/v2",
-        repositoryId: "acme/client",
-        defaultBranch: "main",
-        scannedAt: "2026-09-23T00:03:00.000Z",
-        treeTruncated: false,
-        filesTruncated: false,
-        issuesTruncated: false,
-        files: [{
-          path: "CONTEXT.md",
-          category: "context",
-          sha: "sha-context",
-          content: "# Context\\nManager protocol",
-          truncated: false
-        }],
-        issues: [{
-          number: 12,
-          title: "Align protocol",
-          state: "open",
-          url: "https://github.com/acme/client/issues/12",
-          labels: ["ready-for-agent"],
-          isPullRequest: false
-        }]
-      })
-    };
     const app = await createWorkbenchServer({
       dataDirectory,
-      fixturePath: resolve("fixtures/bridge-components.json"),
-      github
+      fixturePath: resolve("fixtures/bridge-components.json")
     });
     const address = await app.listen(0);
     closeCallbacks.push(app.close);
 
-    await postJson(`${address}/api/manager/repositories`, { reference: "acme/client" });
-    const plan = (await postJson(`${address}/api/manager/plans`, {
-      request: "统一客户端登录协议",
-      repositoryIds: ["acme/client"]
-    })) as {
-      id: string;
-      status: string;
-      workItems: Array<{ id: string; kind: string; status: string }>;
-    };
-    expect(plan.status).toBe("awaiting_confirmation");
-
-    const worker = (await postJson(`${address}/api/manager/workers`, {
-      id: "worker-1",
-      protocolVersion: "uiai-manager/v2",
-      capabilities: ["*"]
-    })) as { generation: string };
-
-    const approved = (await postJson(
-      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/confirm`,
-      { confirmedBy: "manager" }
-    )) as typeof plan;
-    const inspection = approved.workItems.find((task) => task.kind === "inspect_repository")!;
-    expect(inspection.status).toBe("ready");
-
-    const claimed = await postJson(
-      `${address}/api/manager/workers/worker-1/claim?planId=${encodeURIComponent(plan.id)}&workerGeneration=${encodeURIComponent(worker.generation)}`,
-      {}
-    );
-    expect(claimed.taskId).toBe(inspection.id);
-    await postJson(
-      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/start`,
-      { workerId: "worker-1", workerGeneration: worker.generation }
-    );
-    const reported = await postJson(
-      `${address}/api/manager/plans/${encodeURIComponent(plan.id)}/work-items/${encodeURIComponent(inspection.id)}/scan`,
-      { workerId: "worker-1", workerGeneration: worker.generation }
-    );
-    expect(reported.status).toBe("in_progress");
-    expect(github.describe).toHaveBeenCalledWith("acme/client");
-    expect(github.scan).toHaveBeenCalledWith(expect.objectContaining({ id: "acme/client" }));
-    expect(reported.workItems.find((task: { id: string }) => task.id === inspection.id).report.repositoryScan.repositoryId).toBe("acme/client");
+    const response = await fetch(`${address}/api/manager/state`);
+    expect(response.status).toBe(404);
   });
 
   it("accepts model settings in memory without exposing the API key", async () => {
@@ -610,6 +537,114 @@ describe("local workbench HTTP API", () => {
       approved: { id: "button.reward.claim", status: "approved" }
     });
     expect(state.registry.total).toBe(1);
+  });
+
+  it("pulls one Unity component through the local sync endpoint", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const agent: AnalysisAgent = { analyze: vi.fn().mockResolvedValue(proposal) };
+    const adjudicator: SemanticAdjudicator = { adjudicate: vi.fn() };
+    const unityFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          version: "0.1.0",
+          port: 4380,
+          sourceCanvas: "Component Definition",
+          nodes: [
+            {
+              name: "RewardClaimButtonV2",
+              type: "COMPONENT",
+              u2f: { prefabGuid: "guid-reward-claim" },
+              screenshot: PNG_BASE64
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      agents: { structuralAgent: agent, visualAgent: agent, adjudicator },
+      unityFetch
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+
+    await postJson(`${address}/api/analyze`, { sourceId: "guid-reward-claim" });
+    await postJson(`${address}/api/approve`, {
+      sourceId: "guid-reward-claim",
+      id: "button.reward.claim",
+      reviewer: "本地审核员",
+      useCases: ["领取奖励"],
+      visualTraits: ["宽按钮"]
+    });
+
+    const synced = await postJson(`${address}/api/sync/unity`, {
+      port: 4380,
+      objectName: "RewardClaimButton"
+    });
+    expect(synced).toEqual({
+      updated: 1,
+      added: 0,
+      clearedDrafts: false,
+      clearedRegistry: false
+    });
+    expect(unityFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:4380/export?objectName=RewardClaimButton"
+    );
+
+    const state = (await getJson(`${address}/api/state`)) as {
+      observations: {
+        total: number;
+        items: Array<{
+          sourceId: string;
+          name: string;
+          hasPreview: boolean;
+          draft?: { name: string };
+          approved?: { id: string; status: string };
+        }>;
+      };
+      registry: { total: number };
+    };
+    const reward = state.observations.items.find((item) => item.sourceId === "guid-reward-claim");
+    expect(state.observations.total).toBe(12);
+    expect(reward).toMatchObject({
+      name: "RewardClaimButtonV2",
+      hasPreview: true,
+      draft: { name: "RewardClaimButton" },
+      approved: { id: "button.reward.claim", status: "approved" }
+    });
+    expect(state.registry.total).toBe(1);
+  });
+
+  it("does not change the library when Unity cannot find the target", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "ui-ai-workbench-"));
+    const unityFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "target_not_found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const app = await createWorkbenchServer({
+      dataDirectory,
+      fixturePath: resolve("fixtures/bridge-components.json"),
+      unityFetch
+    });
+    const address = await app.listen(0);
+    closeCallbacks.push(app.close);
+    const before = await getJson(`${address}/api/state`);
+
+    const response = await fetch(`${address}/api/sync/unity`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ objectName: "MissingObject" })
+    });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "找不到名为“MissingObject”的物体。" });
+    expect(unityFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:4380/export?objectName=MissingObject"
+    );
+    expect(await getJson(`${address}/api/state`)).toEqual(before);
   });
 
   it("rejects a sync component without a stable prefabGuid", async () => {

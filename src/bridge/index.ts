@@ -9,11 +9,11 @@ import { BRIDGE_SCHEMA_VERSION, SCHEMA_VERSION } from "../schema-version.js";
 
 const BridgeComponentRefSchema = z
   .object({
-    prefabGuid: z.string().optional(),
-    prefabPath: z.string().optional(),
-    scriptType: z.string().optional(),
-    componentTypes: z.array(z.string()).optional(),
-    isNested: z.boolean().optional()
+    prefabGuid: z.string().nullish(),
+    prefabPath: z.string().nullish(),
+    scriptType: z.string().nullish(),
+    componentTypes: z.array(z.string()).nullish(),
+    isNested: z.boolean().nullish()
   })
   .passthrough();
 
@@ -36,30 +36,30 @@ const BridgeNodeSchema = z
     u2f: BridgeComponentRefSchema.optional(),
     layout: z
       .object({
-        rect: BridgeRectSchema.optional(),
+        rect: BridgeRectSchema.nullish(),
         text: z
           .object({
-            characters: z.string().optional(),
-            fontSize: z.number().optional(),
+            characters: z.string().nullish(),
+            fontSize: z.number().nullish(),
             fontName: z
               .object({
-                family: z.string().optional(),
-                style: z.string().optional()
+                family: z.string().nullish(),
+                style: z.string().nullish()
               })
-              .optional()
+              .nullish()
           })
-          .optional(),
+          .nullish(),
         style: z
           .object({
-            backgroundColor: z.string().optional(),
-            backgroundOpacity: z.number().optional(),
-            fillType: z.string().optional()
+            backgroundColor: z.string().nullish(),
+            backgroundOpacity: z.number().nullish(),
+            fillType: z.string().nullish()
           })
-          .optional(),
-        imageBase64: z.string().optional()
+          .nullish(),
+        imageBase64: z.string().nullish()
       })
-      .optional(),
-    screenshot: z.string().optional(),
+      .nullish(),
+    screenshot: z.string().nullish(),
     get children() {
       return z.array(BridgeNodeSchema).default([]);
     }
@@ -102,8 +102,8 @@ function adaptNode(node: BridgeNode, sourcePath: string): ObservedNode {
     name: node.displayName || node.name,
     nodeType: node.type || "UNKNOWN",
     visible: node.visible !== false,
-    ...(node.opacity === undefined ? {} : { opacity: node.opacity }),
-    ...(componentRef === undefined
+    ...(node.opacity == null ? {} : { opacity: node.opacity }),
+    ...(componentRef == null
       ? {}
       : {
           componentRef: {
@@ -111,30 +111,30 @@ function adaptNode(node: BridgeNode, sourcePath: string): ObservedNode {
             ...(componentRef.prefabPath ? { prefabPath: componentRef.prefabPath } : {}),
             ...(componentRef.scriptType ? { scriptType: componentRef.scriptType } : {}),
             componentTypes: componentRef.componentTypes ?? [],
-            ...(componentRef.isNested === undefined
+            ...(componentRef.isNested == null
               ? {}
               : { isNested: componentRef.isNested })
           }
         }),
-    ...(node.layout?.rect === undefined ? {} : { bounds: node.layout.rect }),
-    ...(text === undefined
+    ...(node.layout?.rect == null ? {} : { bounds: node.layout.rect }),
+    ...(text == null
       ? {}
       : {
           text: {
             characters: text.characters ?? "",
             ...(text.fontName?.family ? { fontFamily: text.fontName.family } : {}),
             ...(text.fontName?.style ? { fontStyle: text.fontName.style } : {}),
-            ...(text.fontSize === undefined ? {} : { fontSize: text.fontSize })
+            ...(text.fontSize == null ? {} : { fontSize: text.fontSize })
           }
         }),
-    ...(style === undefined
+    ...(style == null
       ? {}
       : {
           style: {
             ...(style.backgroundColor
               ? { backgroundColor: style.backgroundColor }
               : {}),
-            ...(style.backgroundOpacity === undefined
+            ...(style.backgroundOpacity == null
               ? {}
               : { backgroundOpacity: style.backgroundOpacity }),
             ...(style.fillType ? { fillType: style.fillType } : {})
@@ -145,7 +145,7 @@ function adaptNode(node: BridgeNode, sourcePath: string): ObservedNode {
       : node.screenshot
         ? { imageBase64: node.screenshot }
         : {}),
-    children: node.children.map((child, index) =>
+    children: (node.children ?? []).map((child, index) =>
       adaptNode(child, `${sourcePath}.children[${index}]`)
     )
   };

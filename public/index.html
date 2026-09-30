@@ -30,45 +30,24 @@
             <p id="component-count">正在加载</p>
           </div>
           <input id="component-filter" class="compact-input" type="search" placeholder="筛选组件" />
+          <form id="unity-sync-form" class="unity-sync-form">
+            <label>
+              Unity 对象名
+              <input id="unity-object-name" required maxlength="200" placeholder="RewardClaimButton" />
+            </label>
+            <div class="unity-sync-row">
+              <label>
+                端口
+                <input id="unity-port" type="number" min="1024" max="65535" step="1" value="4380" required />
+              </label>
+              <button class="button primary" type="submit">从本机 Unity 拉取</button>
+            </div>
+          </form>
         </div>
         <div id="component-list" class="component-list"></div>
       </aside>
 
       <section class="content">
-        <section class="manager-panel" aria-labelledby="manager-heading">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">MANAGER / GITHUB</p>
-              <h2 id="manager-heading">Cross-repository coordination</h2>
-            </div>
-            <span class="state-badge">Plan first</span>
-          </div>
-          <div class="manager-grid">
-            <form id="manager-repository-form" class="manager-form">
-              <label>
-                GitHub repository
-                <div class="manager-inline">
-                  <input id="manager-repository-reference" required placeholder="owner/repository" />
-                  <button class="button secondary" type="submit">Register</button>
-                </div>
-              </label>
-              <div id="manager-repositories" class="manager-repositories"></div>
-              <div class="manager-subsection">
-                <span class="manager-subsection-title">Workers connected</span>
-                <div id="manager-workers" class="manager-workers"></div>
-              </div>
-            </form>
-            <form id="manager-plan-form" class="manager-form">
-              <label>
-                Coordination request
-                <textarea id="manager-plan-request" required rows="3" placeholder="Describe the protocol or cross-repository change"></textarea>
-              </label>
-              <button id="manager-create-plan" class="button primary" type="submit" disabled>Create plan</button>
-              <div id="manager-plans" class="manager-plans"></div>
-            </form>
-          </div>
-        </section>
-
         <div class="search-band">
           <form id="search-form" class="search-form">
             <label for="search-query">搜索 Approved Registry</label>

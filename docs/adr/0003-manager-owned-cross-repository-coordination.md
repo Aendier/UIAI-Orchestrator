@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0007](0007-retire-the-workbench-manager.md). Kept as history; it is not an implementation requirement.
 
 ## Context
 

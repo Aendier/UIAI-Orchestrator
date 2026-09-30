@@ -48,6 +48,10 @@ The controlled semantic types, roles, capabilities, and states accepted by schem
 The deterministic Unity-Figma converter. It does not infer semantics, match components, or approve knowledge.
 _Avoid_: AI bridge, generator
 
+**统筹**:
+The single person-facing owner of one UI task. It is not a repository, a Figma writer, or a second workbench.
+_Avoid_: Manager, Orchestrator, 对话代理
+
 **Component Definition Page**:
 The Figma Page containing Main Components created or updated from Unity Prefabs by UFB.
 _Avoid_: Component Catalog Page, Generated Page
@@ -96,27 +100,6 @@ A retired component retained for dependency discovery and migration but prohibit
 **Adjudicator**:
 The analysis role invoked only when independent proposals materially conflict.
 
-**Manager**:
-The sole coordination interface for cross-repository requests, protocol decisions, task assignment, and worker reports.
-
-**Repository Descriptor**:
-A manager-owned description of one GitHub repository, including its stable reference, default branch, and remote URL.
-
-**Coordination Plan**:
-A versioned, cross-repository work proposal that remains awaiting confirmation until the manager receives explicit approval.
-
-**Work Item**:
-A repository-scoped or manager-scoped task in a Coordination Plan with dependencies, write intent, and lifecycle status.
-
-**Worker Report**:
-A versioned result returned through the Manager for one Work Item, including worker identity, evidence, changed files, tests, and blockers.
-
-**Protocol Decision**:
-A versioned, structured contract decision with language-neutral schemas, compatibility rules, migration steps, and evidence, produced by the Manager's protocol-unification Work Item and consumed by repository-scoped proposals.
-
-**Repository Scan**:
-A read-only snapshot of prioritized repository context, protocol/configuration files, and open GitHub Issues or pull requests, attached to an inspection Work Item as evidence. Tree, file-selection, and issue-pagination truncation are explicit fields.
-
 ## Invariants
 
 - Source adapters do not invent semantics.
@@ -132,9 +115,6 @@ A read-only snapshot of prioritized repository context, protocol/configuration f
 - Changing an Approved Page's composition creates a new Page Draft.
 - Linked Component Instances may update through an atomic UFB sync and then require page revalidation.
 - AI may propose a Promotion Candidate but cannot publish it as a component.
-- Cross-repository changes are coordinated through the Manager and one versioned Coordination Plan.
-- A Coordination Plan cannot unlock write-intent Work Items until explicit manager confirmation.
-- Workers register capabilities, claim Work Items, and report results through the Manager; the Manager is the only cross-repository coordination interface.
-- A completed protocol-unification Work Item produces one structured, versioned Protocol Decision used by downstream proposals.
-- Component observations, semantic drafts, and approved components are shared through `protocol/uiai-component.json`. Consumers do not need the Manager to read or validate them.
-- New product functionality is implemented by one agent against that shared protocol, not by adding Manager workers or coordination plans.
+- This repository does not provide a Manager, worker queue, or cross-repository coordination API.
+- Component observations, semantic drafts, and approved components are shared through `protocol/uiai-component.json`.
+- New product functionality is implemented by one agent against that shared protocol.

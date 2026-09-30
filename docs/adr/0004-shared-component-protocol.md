@@ -14,7 +14,7 @@ Cross-repository work was previously routed through a Manager, workers, and coor
 - The public component contract is `uiai-protocol/v1`, produced by `createSharedProtocol()`.
 - The contract is published at `protocol/uiai-component.json` and importable as `uiai-orchestrator/protocol`.
 - The contract covers component observations, observation documents, semantic drafts, approved components, and the component registry.
-- ADR 0003 still describes the existing workbench Manager. That Manager is not required to read or validate these component structures, and it is not extended for new feature work.
+- The workbench Manager described by ADR 0003 has been removed. See ADR 0007.
 
 ## Consequences
 

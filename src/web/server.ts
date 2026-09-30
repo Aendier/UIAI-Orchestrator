@@ -16,10 +16,6 @@ import {
   ModelBaseUrlSchema,
   type ModelConfigOptions
 } from "../ai/model-config.js";
-import {
-  createGitHubRepositoryAdapter,
-  type GitHubRepositoryAdapter
-} from "../github/repository.js";
 import { adaptBridgeDocument } from "../bridge/index.js";
 import {
   ObservationDocumentSchema,
@@ -35,8 +31,6 @@ import {
   type ComponentRegistry
 } from "../registry/index.js";
 import { SCHEMA_VERSION } from "../schema-version.js";
-import { WorkerReportSchema } from "../manager/protocol.js";
-import { ManagerStore, ManagerStoreError } from "../manager/store.js";
 import {
   analyzeComponent,
   SemanticDraftSchema,
@@ -57,7 +51,7 @@ interface WorkbenchOptions {
   publicDirectory?: string;
   agents?: AgentSet;
   modelFetch?: typeof fetch;
-  github?: GitHubRepositoryAdapter;
+  unityFetch?: typeof fetch;
   model?: {
     baseUrl: string;
     apiKey: string;
@@ -101,29 +95,13 @@ const ModelRequestSchema = z.object({
   model: z.string().min(1),
   wireApi: z.enum(["chat_completions", "responses"]).optional()
 });
-const ManagerRepositoryRequestSchema = z.object({
-  reference: z.string().min(1)
+const UnitySyncRequestSchema = z.object({
+  port: z.number().int().min(1024).max(65535).default(4380),
+  objectName: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1).max(200))
 });
-const ManagerPlanRequestSchema = z.object({
-  request: z.string().min(1),
-  repositoryIds: z.array(z.string().min(1)).min(1).refine(
-    (repositoryIds) => new Set(repositoryIds).size === repositoryIds.length,
-    "repositoryIds must be unique"
-  )
-});
-const ManagerWorkerRequestSchema = z.object({
-  id: z.string().min(1),
-  capabilities: z.array(z.string().min(1)).min(1),
-  protocolVersion: z.string().min(1)
-});
-const ManagerActorRequestSchema = z.object({
-  confirmedBy: z.string().min(1).default("manager")
-});
-const ManagerWorkerActionRequestSchema = z.object({
-  workerId: z.string().min(1),
-  workerGeneration: z.string().min(1)
-});
-
 export async function createWorkbenchServer(
   options: WorkbenchOptions = {}
 ): Promise<WorkbenchServer> {
@@ -153,6 +131,7 @@ export async function createWorkbenchServer(
   const runtime = {
     agents,
     modelFetch: options.modelFetch,
+    unityFetch: options.unityFetch ?? fetch,
     model: {
       ready: agents !== undefined,
       name: loadedModel.model,
@@ -162,16 +141,12 @@ export async function createWorkbenchServer(
     }
   };
   const store = new WorkbenchStore(dataDirectory, fixturePath);
-  const managerStore = new ManagerStore(dataDirectory);
-  await Promise.all([store.initialize(), managerStore.initialize()]);
-  const github = options.github ?? createGitHubRepositoryAdapter();
+  await store.initialize();
 
   const server = createServer(async (request, response) => {
     try {
       await routeRequest(request, response, {
         store,
-        managerStore,
-        github,
         publicDirectory,
         runtime
       });
@@ -181,18 +156,14 @@ export async function createWorkbenchServer(
       const status =
         error instanceof HttpError
           ? error.status
-          : error instanceof ManagerStoreError
-            ? error.status
-            : authenticationFailure
-              ? 502
-              : error instanceof z.ZodError
-                ? 400
-                : 500;
+          : authenticationFailure
+            ? 502
+            : error instanceof z.ZodError
+              ? 400
+              : 500;
       const message = authenticationFailure
         ? "模型服务认证失败，请打开模型设置检查地址、模型和密钥。"
-        : error instanceof ManagerStoreError
-          ? error.message
-          : error instanceof z.ZodError
+        : error instanceof z.ZodError
           ? "Invalid request parameters."
           : error instanceof Error
             ? error.message
@@ -230,13 +201,12 @@ async function routeRequest(
   response: ServerResponse,
   context: {
     store: WorkbenchStore;
-    managerStore: ManagerStore;
-    github: GitHubRepositoryAdapter;
     publicDirectory: string;
-    runtime: {
-      agents: AgentSet | undefined;
-      modelFetch: typeof fetch | undefined;
-      model: {
+      runtime: {
+        agents: AgentSet | undefined;
+        modelFetch: typeof fetch | undefined;
+        unityFetch: typeof fetch;
+        model: {
         ready: boolean;
         name: string;
         baseUrl: string;
@@ -250,140 +220,6 @@ async function routeRequest(
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
 
   if (method === "POST") assertTrustedMutation(request);
-
-  if (method === "GET" && path === "/api/manager/state") {
-    sendJson(response, 200, await context.managerStore.readState());
-    return;
-  }
-
-  if (method === "POST" && path === "/api/manager/repositories") {
-    const input = ManagerRepositoryRequestSchema.parse(await readJsonBody(request));
-    const repository = await context.github.describe(input.reference);
-    sendJson(response, 200, await context.managerStore.registerRepository(repository));
-    return;
-  }
-
-  if (method === "POST" && path === "/api/manager/workers") {
-    const input = ManagerWorkerRequestSchema.parse(await readJsonBody(request));
-    sendJson(response, 200, await context.managerStore.registerWorker(input));
-    return;
-  }
-
-  if (method === "POST" && path === "/api/manager/plans") {
-    const input = ManagerPlanRequestSchema.parse(await readJsonBody(request));
-    sendJson(
-      response,
-      200,
-      await context.managerStore.createPlan(input.request, input.repositoryIds)
-    );
-    return;
-  }
-
-  const confirmPlanMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/confirm$/);
-  if (method === "POST" && confirmPlanMatch) {
-    const input = ManagerActorRequestSchema.parse(await readJsonBody(request));
-    sendJson(
-      response,
-      200,
-      await context.managerStore.confirmPlan(
-        decodePathSegment(confirmPlanMatch[1]!),
-        input.confirmedBy
-      )
-    );
-    return;
-  }
-
-  const assignWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/assign$/);
-  if (method === "POST" && assignWorkItemMatch) {
-    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
-    sendJson(
-      response,
-      200,
-      await context.managerStore.assignTask(
-        decodePathSegment(assignWorkItemMatch[1]!),
-        decodePathSegment(assignWorkItemMatch[2]!),
-        input.workerId,
-        input.workerGeneration
-      )
-    );
-    return;
-  }
-
-  const claimWorkItemMatch = path.match(/^\/api\/manager\/workers\/([^/]+)\/claim$/);
-  if (method === "POST" && claimWorkItemMatch) {
-    const query = new URL(request.url ?? "/", "http://localhost").searchParams;
-    const claimed = await context.managerStore.claimNextTask(
-      decodePathSegment(claimWorkItemMatch[1]!),
-      z.string().min(1).parse(query.get("workerGeneration")),
-      query.get("planId") ?? undefined
-    );
-    sendJson(response, 200, claimed ?? { plan: null, taskId: null });
-    return;
-  }
-
-  const startWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/start$/);
-  if (method === "POST" && startWorkItemMatch) {
-    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
-    sendJson(
-      response,
-      200,
-      await context.managerStore.startTask(
-        decodePathSegment(startWorkItemMatch[1]!),
-        decodePathSegment(startWorkItemMatch[2]!),
-        input.workerId,
-        input.workerGeneration
-      )
-    );
-    return;
-  }
-
-  const scanWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/scan$/);
-  if (method === "POST" && scanWorkItemMatch) {
-    const input = ManagerWorkerActionRequestSchema.parse(await readJsonBody(request));
-    if (!context.github.scan) {
-      throw new HttpError(501, "The configured GitHub adapter does not support repository scans.");
-    }
-    sendJson(
-      response,
-      200,
-      await context.managerStore.scanRepositoryWorkItem(
-        decodePathSegment(scanWorkItemMatch[1]!),
-        decodePathSegment(scanWorkItemMatch[2]!),
-        input.workerId,
-        input.workerGeneration,
-        (repository) => context.github.scan!(repository)
-      )
-    );
-    return;
-  }
-
-  const reportWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/report$/);
-  if (method === "POST" && reportWorkItemMatch) {
-    const report = WorkerReportSchema.parse(await readJsonBody(request));
-    sendJson(
-      response,
-      200,
-      await context.managerStore.reportTask(
-        decodePathSegment(reportWorkItemMatch[1]!),
-        decodePathSegment(reportWorkItemMatch[2]!),
-        report
-      )
-    );
-    return;
-  }
-
-  const retryWorkItemMatch = path.match(/^\/api\/manager\/plans\/([^/]+)\/work-items\/([^/]+)\/retry$/);
-  if (method === "POST" && retryWorkItemMatch) {
-    sendJson(
-      response,
-      200,
-      await context.managerStore.retryTask(
-        decodePathSegment(retryWorkItemMatch[1]!),
-        decodePathSegment(retryWorkItemMatch[2]!)
-      )
-    );
-    return;
-  }
 
   if (method === "GET" && path === "/api/state") {
     const { observations, drafts, registry } = await context.store.readSnapshot();
@@ -495,6 +331,46 @@ async function routeRequest(
   if (method === "POST" && path === "/api/sync") {
     const imported = adaptBridgeDocument(await readJsonBody(request));
     const result = await context.store.syncLibrary(imported);
+    sendJson(response, 200, {
+      ...result,
+      clearedDrafts: false,
+      clearedRegistry: false
+    });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/sync/unity") {
+    const input = UnitySyncRequestSchema.parse(await readJsonBody(request));
+    const exported = await fetchUnityDocument(
+      context.runtime.unityFetch,
+      input.port,
+      input.objectName
+    );
+    if (
+      isRecord(exported) &&
+      Object.prototype.hasOwnProperty.call(exported, "port") &&
+      exported.port !== input.port
+    ) {
+      throw new HttpError(502, "Unity 导出的端口与请求端口不一致。");
+    }
+
+    let imported: ObservationDocument;
+    try {
+      imported = adaptBridgeDocument(exported);
+    } catch (error: unknown) {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(502, "Unity 导出不是带节点的 Bridge 0.1.0 文档。");
+    }
+
+    let result: { updated: number; added: number };
+    try {
+      result = await context.store.syncLibrary(imported);
+    } catch (error: unknown) {
+      if (error instanceof HttpError && error.status === 400) {
+        throw new HttpError(502, "Unity 导出包含无效或重复的 prefabGuid。");
+      }
+      throw error;
+    }
     sendJson(response, 200, {
       ...result,
       clearedDrafts: false,
@@ -682,6 +558,74 @@ class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+async function fetchUnityDocument(
+  unityFetch: typeof fetch,
+  port: number,
+  objectName: string
+): Promise<unknown> {
+  const url = `http://127.0.0.1:${port}/export?objectName=${encodeURIComponent(objectName)}`;
+  let response: Response;
+  try {
+    response = await withTimeout(
+      Promise.resolve(unityFetch(url)),
+      30_000,
+      () => new HttpError(504, "导出超时，请核对端口。")
+    );
+  } catch (error: unknown) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(502, "请在 Unity 的 UIR/Figma Bridge 窗口点 Start。");
+  }
+
+  if (response.status === 404) {
+    throw new HttpError(404, `找不到名为“${objectName}”的物体。`);
+  }
+  if (response.status === 409) {
+    throw new HttpError(409, "有多个同名物体，要求名称唯一。");
+  }
+  if (response.status === 503) {
+    throw new HttpError(503, "Unity 本机服务未就绪。");
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(await response.text()) as unknown;
+  } catch {
+    throw new HttpError(502, "Unity 导出响应不是有效的 JSON。");
+  }
+
+  const errorCode = isRecord(payload) && typeof payload.error === "string"
+    ? payload.error
+    : undefined;
+  if (errorCode === "target_not_found") {
+    throw new HttpError(404, `找不到名为“${objectName}”的物体。`);
+  }
+  if (errorCode === "target_name_ambiguous") {
+    throw new HttpError(409, "有多个同名物体，要求名称唯一。");
+  }
+  if (response.status >= 400) {
+    throw new HttpError(502, `Unity 导出失败（HTTP ${response.status}）。`);
+  }
+  return payload;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  createError: () => Error
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(createError()), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function staticAsset(path: string): { file: string; contentType: string } | undefined {
