@@ -6,6 +6,7 @@ import { parse } from "smol-toml";
 import { z } from "zod";
 
 import type { ModelWireApi } from "./openai-compatible.js";
+import { readAioaCredential, saveAioaCredential } from "./credential-cache.js";
 
 export interface LoadedModelConfig {
   baseUrl: string;
@@ -13,12 +14,14 @@ export interface LoadedModelConfig {
   model: string;
   wireApi: ModelWireApi;
   requiresAuth: boolean;
-  source: "codex" | "default" | "environment";
+  source: "codex" | "aioa-cache" | "default" | "environment";
 }
 
 export interface ModelConfigOptions {
   environment?: NodeJS.ProcessEnv;
   homeDirectory?: string;
+  /** Optional Windows user-encrypted cache for the host-injected AIOA token. */
+  credentialCachePath?: string;
 }
 
 export const ModelBaseUrlSchema = z.url().refine(
@@ -69,11 +72,24 @@ export async function loadModelConfig(
     };
   }
 
-  const codexDirectory = join(options.homeDirectory ?? homedir(), ".codex");
-  const [config, auth] = await Promise.all([
-    readOptionalToml(join(codexDirectory, "config.toml")),
-    readOptionalJson(join(codexDirectory, "auth.json"))
-  ]);
+  const codexDirectories = resolveCodexDirectories(options, environment);
+  let codexDirectory = codexDirectories[0]!;
+  let config: z.infer<typeof CodexConfigSchema> | undefined;
+  for (const candidate of codexDirectories) {
+    const candidateConfig = await readOptionalToml(join(candidate, "config.toml"));
+    // AIOA may keep project trust settings in the same config directory. Only a
+    // file that declares model selection belongs to the model provider loader.
+    if (candidateConfig && (
+      candidateConfig.model_provider ||
+      candidateConfig.model ||
+      candidateConfig.model_providers
+    )) {
+      codexDirectory = candidate;
+      config = candidateConfig;
+      break;
+    }
+  }
+  const auth = await readOptionalJson(join(codexDirectory, "auth.json"));
   if (!config) {
     if (auth?.OPENAI_API_KEY) {
       throw new Error(
@@ -97,15 +113,45 @@ export async function loadModelConfig(
     throw new Error(`Codex provider is missing base_url: ${config.model_provider}`);
   }
   const configuredEnvironment = config.shell_environment_policy?.set;
+  let apiKey = resolveProviderApiKey(provider, auth, environment, configuredEnvironment);
+  let source: LoadedModelConfig["source"] = "codex";
+  if (options.credentialCachePath && !provider.env_key && provider.requires_openai_auth !== false) {
+    if (environment.CODEX_API_KEY) {
+      try {
+        await saveAioaCredential(options.credentialCachePath, { baseUrl: provider.base_url, apiKey });
+      } catch {
+        console.warn("AIOA 凭据加密缓存未能更新；当前会话仍可使用，独立启动可能需要重新连接。");
+      }
+    } else {
+      const cached = await readAioaCredential(options.credentialCachePath, provider.base_url);
+      if (cached) {
+        apiKey = cached;
+        source = "aioa-cache";
+      }
+    }
+  }
 
   return {
     baseUrl: provider.base_url,
-    apiKey: resolveProviderApiKey(provider, auth, environment, configuredEnvironment),
+    apiKey,
     model: config.model,
     wireApi: parseWireApi(provider.wire_api, `Codex wire_api for ${config.model_provider}`),
     requiresAuth: provider.env_key !== undefined || provider.requires_openai_auth !== false,
-    source: "codex"
+    source
   };
+}
+
+function resolveCodexDirectories(
+  options: ModelConfigOptions,
+  environment: NodeJS.ProcessEnv
+): string[] {
+  if (options.homeDirectory !== undefined) return [join(options.homeDirectory, ".codex")];
+  const directories = [
+    ...(environment.CODEX_HOME ? [environment.CODEX_HOME] : []),
+    ...(environment.APPDATA ? [join(environment.APPDATA, "AIOA", "codex")] : []),
+    join(homedir(), ".codex")
+  ];
+  return [...new Set(directories)];
 }
 
 function resolveProviderApiKey(
@@ -118,7 +164,11 @@ function resolveProviderApiKey(
     return environment[provider.env_key] ?? configuredEnvironment?.[provider.env_key] ?? "";
   }
   if (provider.requires_openai_auth === false) return "";
-  return auth?.OPENAI_API_KEY ?? configuredEnvironment?.OPENAI_API_KEY ?? "";
+  // AIOA injects the active built-in credential as CODEX_API_KEY. Prefer it
+  // over a stale Codex auth.json key when the provider does not name another
+  // provider-specific environment variable.
+  if (environment.CODEX_API_KEY) return environment.CODEX_API_KEY;
+  return configuredEnvironment?.OPENAI_API_KEY ?? auth?.OPENAI_API_KEY ?? "";
 }
 
 async function readOptionalToml(

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,85 @@ import { describe, expect, it } from "vitest";
 import { loadModelConfig } from "../src/ai/model-config.js";
 
 describe("loadModelConfig", () => {
+  it.runIf(process.platform === "win32")("reuses an encrypted AIOA credential without session variables and refreshes it on rotation", async () => {
+    const homeDirectory = await createCachedCredentialFixture();
+    const credentialCachePath = join(homeDirectory, "aioa-credential.dpapi");
+    const options = { homeDirectory, credentialCachePath };
+
+    await loadModelConfig({ ...options, environment: { CODEX_API_KEY: "first-session-secret" } });
+    const standalone = await loadModelConfig({ ...options, environment: {} });
+    expect(standalone).toMatchObject({ apiKey: "first-session-secret", source: "aioa-cache" });
+    const stored = await readFile(credentialCachePath, "utf8");
+    expect(stored).not.toContain("first-session-secret");
+    expect(stored).not.toContain("models.example.test");
+
+    await loadModelConfig({ ...options, environment: { CODEX_API_KEY: "rotated-session-secret" } });
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "rotated-session-secret", source: "aioa-cache"
+    });
+  });
+
+  it.runIf(process.platform === "win32")("does not send a cached AIOA credential to a different provider", async () => {
+    const homeDirectory = await createCachedCredentialFixture();
+    const options = { homeDirectory, credentialCachePath: join(homeDirectory, "aioa-credential.dpapi") };
+    await loadModelConfig({ ...options, environment: { CODEX_API_KEY: "aioa-session-secret" } });
+    const configPath = join(homeDirectory, ".codex", "config.toml");
+    await writeFile(configPath, (await readFile(configPath, "utf8"))
+      .replace("models.example.test", "other.example.test"), "utf8");
+
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "stored-provider-secret", source: "codex"
+    });
+  });
+
+  it.runIf(process.platform === "win32")("recovers from a damaged encrypted cache when a fresh AIOA session is available", async () => {
+    const homeDirectory = await createCachedCredentialFixture();
+    const credentialCachePath = join(homeDirectory, "aioa-credential.dpapi");
+    const options = { homeDirectory, credentialCachePath };
+    await writeFile(credentialCachePath, "broken-cache", "utf8");
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "stored-provider-secret", source: "codex"
+    });
+    await loadModelConfig({ ...options, environment: { CODEX_API_KEY: "fresh-session-secret" } });
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "fresh-session-secret", source: "aioa-cache"
+    });
+  });
+
+  it.runIf(process.platform === "win32")("keeps cached AIOA credentials out of provider-specific and anonymous authentication", async () => {
+    const homeDirectory = await createCachedCredentialFixture();
+    const options = { homeDirectory, credentialCachePath: join(homeDirectory, "aioa-credential.dpapi") };
+    await loadModelConfig({ ...options, environment: { CODEX_API_KEY: "aioa-session-secret" } });
+    const configPath = join(homeDirectory, ".codex", "config.toml");
+    const config = await readFile(configPath, "utf8");
+    await writeFile(configPath, `${config}\nenv_key = "CUSTOM_API_KEY"`, "utf8");
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "", source: "codex", requiresAuth: true
+    });
+    expect(await loadModelConfig({ ...options, environment: { CUSTOM_API_KEY: "custom-provider-secret" } }))
+      .toMatchObject({ apiKey: "custom-provider-secret", source: "codex" });
+    await writeFile(configPath, `${config}\nrequires_openai_auth = false`, "utf8");
+    expect(await loadModelConfig({ ...options, environment: {} })).toMatchObject({
+      apiKey: "", source: "codex", requiresAuth: false
+    });
+  });
+
+  it("falls back past an AIOA runtime config that only contains project trust", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ui-ai-aioa-config-"));
+    const runtime = join(root, "runtime");
+    const persisted = join(root, "AIOA", "codex");
+    await mkdir(runtime);
+    await mkdir(persisted, { recursive: true });
+    await writeFile(join(runtime, "config.toml"), '[projects.example]\ntrust_level = "trusted"', "utf8");
+    await writeFile(join(persisted, "config.toml"), [
+      'model_provider = "test"', 'model = "gpt-6-astra"',
+      '[model_providers.test]', 'base_url = "https://models.example.test/v1"'
+    ].join("\n"), "utf8");
+    expect(await loadModelConfig({ environment: {
+      CODEX_HOME: runtime, APPDATA: root, CODEX_API_KEY: "aioa-session-secret"
+    } })).toMatchObject({ model: "gpt-6-astra", apiKey: "aioa-session-secret" });
+  });
+
   it("loads the selected Codex provider and authentication without browser input", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "ui-ai-codex-home-"));
     const codexDirectory = join(homeDirectory, ".codex");
@@ -39,6 +118,95 @@ describe("loadModelConfig", () => {
       requiresAuth: true,
       source: "codex"
     });
+  });
+
+  it("uses the AIOA built-in CODEX_API_KEY before a stale Codex auth key", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "ui-ai-codex-home-"));
+    const codexDirectory = join(homeDirectory, ".codex");
+    await mkdir(codexDirectory);
+    await writeFile(
+      join(codexDirectory, "config.toml"),
+      [
+        'model_provider = "taishi"',
+        'model = "gpt-6-astra"',
+        "[model_providers.taishi]",
+        'base_url = "https://models.example.test/v1"',
+        'wire_api = "responses"'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(codexDirectory, "auth.json"),
+      JSON.stringify({ OPENAI_API_KEY: "stale-codex-secret" }),
+      "utf8"
+    );
+
+    const model = await loadModelConfig({
+      homeDirectory,
+      environment: { CODEX_API_KEY: "aioa-built-in-secret" }
+    });
+
+    expect(model.apiKey).toBe("aioa-built-in-secret");
+    expect(model.source).toBe("codex");
+  });
+
+  it("uses the persisted AIOA Codex directory when launched outside the AIOA session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ui-ai-aioa-home-"));
+    const aioaCodex = join(root, "AIOA", "codex");
+    await mkdir(aioaCodex, { recursive: true });
+    await writeFile(
+      join(aioaCodex, "config.toml"),
+      [
+        'model_provider = "taishi"',
+        'model = "gpt-6-astra"',
+        "[model_providers.taishi]",
+        'base_url = "https://models.example.test/v1"',
+        'wire_api = "responses"',
+        "requires_openai_auth = true",
+        "[shell_environment_policy.set]",
+        'OPENAI_API_KEY = "persisted-aioa-secret"'
+      ].join("\n"),
+      "utf8"
+    );
+
+    const environment = { APPDATA: root } as NodeJS.ProcessEnv;
+    const loaded = await loadModelConfig({ environment });
+
+    expect(loaded).toMatchObject({
+      baseUrl: "https://models.example.test/v1",
+      apiKey: "persisted-aioa-secret",
+      model: "gpt-6-astra",
+      wireApi: "responses",
+      source: "codex"
+    });
+  });
+
+  it("prefers the provider environment key over stale auth.json credentials", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "ui-ai-codex-home-"));
+    const codexDirectory = join(homeDirectory, ".codex");
+    await mkdir(codexDirectory);
+    await writeFile(
+      join(codexDirectory, "config.toml"),
+      [
+        'model_provider = "taishi"',
+        'model = "gpt-6-astra"',
+        "[model_providers.taishi]",
+        'base_url = "https://models.example.test/v1"',
+        'wire_api = "responses"',
+        "[shell_environment_policy.set]",
+        'OPENAI_API_KEY = "current-provider-secret"'
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(
+      join(codexDirectory, "auth.json"),
+      JSON.stringify({ OPENAI_API_KEY: "stale-auth-secret" }),
+      "utf8"
+    );
+
+    const model = await loadModelConfig({ homeDirectory, environment: {} });
+
+    expect(model.apiKey).toBe("current-provider-secret");
   });
 
   it("prefers explicit environment settings over Codex defaults", async () => {
@@ -285,3 +453,16 @@ describe("loadModelConfig", () => {
     await expect(loadModelConfig({ homeDirectory, environment: {} })).rejects.toThrow();
   });
 });
+
+async function createCachedCredentialFixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "ui-ai-credential-cache-"));
+  await mkdir(join(root, ".codex"));
+  await writeFile(join(root, ".codex", "config.toml"), [
+    'model_provider = "test"', 'model = "gpt-6-astra"',
+    '[model_providers.test]', 'base_url = "https://models.example.test/v1"',
+    'wire_api = "responses"'
+  ].join("\n"), "utf8");
+  await writeFile(join(root, ".codex", "auth.json"),
+    JSON.stringify({ OPENAI_API_KEY: "stored-provider-secret" }), "utf8");
+  return root;
+}

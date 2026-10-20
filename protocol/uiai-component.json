@@ -38,6 +38,24 @@
           },
           "root": {
             "$ref": "#/$defs/__schema0"
+          },
+          "enginePresence": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "present",
+              "missing"
+            ]
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "missingSince": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           }
         },
         "required": [
@@ -80,6 +98,10 @@
                   "prefabPath": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "assetDependencyHash": {
+                    "type": "string",
+                    "pattern": "^(?!0+$)[a-f0-9]{32}$"
                   },
                   "scriptType": {
                     "type": "string",
@@ -238,6 +260,24 @@
                 },
                 "root": {
                   "$ref": "#/$defs/__schema0"
+                },
+                "enginePresence": {
+                  "type": "string",
+                  "enum": [
+                    "unknown",
+                    "present",
+                    "missing"
+                  ]
+                },
+                "lastSeenAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "missingSince": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                 }
               },
               "required": [
@@ -288,6 +328,10 @@
                   "prefabPath": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "assetDependencyHash": {
+                    "type": "string",
+                    "pattern": "^(?!0+$)[a-f0-9]{32}$"
                   },
                   "scriptType": {
                     "type": "string",
@@ -419,6 +463,28 @@
           "name": {
             "type": "string",
             "minLength": 1
+          },
+          "observationFingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "definitionFingerprint": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "const": "uiai-definition/v1"
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "version",
+              "hash"
+            ],
+            "additionalProperties": false
           },
           "proposals": {
             "type": "object",
@@ -913,6 +979,28 @@
               "additionalProperties": false
             }
           },
+          "observationFingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "definitionFingerprint": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "const": "uiai-definition/v1"
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "version",
+              "hash"
+            ],
+            "additionalProperties": false
+          },
           "approvedBy": {
             "type": "string",
             "minLength": 1
@@ -1060,6 +1148,28 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "observationFingerprint": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "definitionFingerprint": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "const": "uiai-definition/v1"
+                    },
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "hash"
+                  ],
+                  "additionalProperties": false
                 },
                 "approvedBy": {
                   "type": "string",

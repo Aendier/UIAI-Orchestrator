@@ -6,6 +6,30 @@ const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 describe("UFB component import", () => {
+  it.each([
+    ["2026-10-08T19:45:06.0835662+08:00", "2026-10-08T11:45:06.083Z"],
+    ["2026-10-08T06:45:06.0835662-05:00", "2026-10-08T11:45:06.083Z"],
+    ["2026-10-08T11:45:06.083Z", "2026-10-08T11:45:06.083Z"]
+  ])("normalizes Unity export time %s to UTC", (exportTime, observedAt) => {
+    const document = adaptBridgeDocument({
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      exportTime,
+      nodes: [{ name: "RewardClaimButton", u2f: { prefabGuid: "guid-reward-claim" } }]
+    });
+
+    expect(document.observations[0]?.source.observedAt).toBe(observedAt);
+  });
+
+  it("rejects an export time without a timezone", () => {
+    expect(() => adaptBridgeDocument({
+      version: "0.1.0",
+      sourceCanvas: "Component Definition",
+      exportTime: "2026-10-08T19:45:06.083",
+      nodes: [{ name: "RewardClaimButton", u2f: { prefabGuid: "guid-reward-claim" } }]
+    })).toThrow();
+  });
+
   it("keeps a main-component screenshot as observation image evidence", () => {
     const document = adaptBridgeDocument({
       version: "0.1.0",
@@ -80,7 +104,7 @@ describe("UFB component import", () => {
     expect(root?.style).toEqual({ backgroundOpacity: 1 });
     expect(root?.children[0]?.sourceId).toBe("nodes[0].children[0]");
     expect(root?.children[0]?.imageBase64).toBeUndefined();
-    expect(root?.children[0]?.componentRef?.prefabGuid).toBeUndefined();
+    expect(root?.children[0]).not.toHaveProperty("componentRef.prefabGuid");
   });
 
 });

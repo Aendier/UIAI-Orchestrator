@@ -12,4 +12,4 @@ if not exist "node_modules\tsx\dist\cli.mjs" (
   pause
   exit /b 1
 )
-node "node_modules\tsx\dist\cli.mjs" "src\web\server.ts" %*
+node "scripts\start-workbench.mjs" %*

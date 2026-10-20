@@ -1,78 +1,22 @@
-import { z } from "zod";
+import {
+  SemanticProposalSchema,
+  type SemanticDraft,
+  type SemanticProposal
+} from "@uiai/protocol/semantic";
 
 import {
   ComponentObservationSchema,
   type ComponentObservation
 } from "../observation/index.js";
 import { SCHEMA_VERSION } from "../schema-version.js";
+import { createObservationFingerprint, createDefinitionFingerprint } from "../shared/fingerprint.js";
+import { describeAnalysisError } from "../ai/diagnostics.js";
 
 export { type ComponentObservation } from "../observation/index.js";
-
-export const SemanticTypeSchema = z.enum([
-  "button",
-  "item",
-  "navigation",
-  "container",
-  "text",
-  "image",
-  "progress",
-  "unknown"
-]);
-
-export const SemanticRoleSchema = z.enum([
-  "reward.claim",
-  "reward.display",
-  "common.close",
-  "navigation.tab",
-  "primary.action",
-  "shop.purchase",
-  "content.header",
-  "progress.display",
-  "generic",
-  "unknown"
-]);
-
-export const CapabilitySchema = z.enum([
-  "click",
-  "text",
-  "image",
-  "disabled.state",
-  "selected.state",
-  "display.icon",
-  "display.quantity",
-  "display.rarity",
-  "display.progress",
-  "navigation.select",
-  "container.children"
-]);
-
-export const EvidenceSchema = z.object({
-  sourcePath: z.string().min(1),
-  value: z.unknown(),
-  rationale: z.string().min(1)
-});
-
-export const SemanticProposalSchema = z.object({
-  semanticType: SemanticTypeSchema,
-  role: SemanticRoleSchema,
-  capabilities: z.array(CapabilitySchema),
-  confidence: z.object({
-    semanticType: z.number().min(0).max(1),
-    role: z.number().min(0).max(1),
-    capabilities: z.number().min(0).max(1)
-  }),
-  evidence: z.array(EvidenceSchema).min(1),
-  summary: z.string().min(1)
-});
-
-export type SemanticProposal = z.infer<typeof SemanticProposalSchema>;
-
-export const SemanticDecisionSchema = SemanticProposalSchema.extend({
-  status: z.enum(["draft", "needs_review"])
-});
+export * from "@uiai/protocol/semantic";
 
 export interface AnalysisAgent {
-  analyze(observation: ComponentObservation): Promise<unknown>;
+  analyze(observation: ComponentObservation, signal?: AbortSignal): Promise<unknown>;
 }
 
 export interface SemanticAdjudicator {
@@ -80,44 +24,50 @@ export interface SemanticAdjudicator {
     observation: ComponentObservation;
     structural: SemanticProposal;
     visual: SemanticProposal;
-  }): Promise<unknown>;
+  }, signal?: AbortSignal): Promise<unknown>;
 }
-
-export const SemanticDraftSchema = z.object({
-  schemaVersion: z.literal(SCHEMA_VERSION),
-  sourceId: z.string().min(1),
-  name: z.string().min(1),
-  proposals: z.object({
-    structural: SemanticProposalSchema,
-    visual: SemanticProposalSchema
-  }),
-  decision: SemanticDecisionSchema,
-  conflicts: z.array(z.string().min(1))
-});
-
-export type SemanticDraft = z.infer<typeof SemanticDraftSchema>;
 
 export async function analyzeComponent(input: {
   observation: ComponentObservation;
   structuralAgent: AnalysisAgent;
   visualAgent: AnalysisAgent;
   adjudicator: SemanticAdjudicator;
+  signal?: AbortSignal | undefined;
 }): Promise<SemanticDraft> {
   const observation = ComponentObservationSchema.parse(input.observation);
-  const [structuralResult, visualResult] = await Promise.all([
-    input.structuralAgent.analyze(observation),
-    input.visualAgent.analyze(observation)
+  throwIfAborted(input.signal);
+  const [structuralResult, visualResult] = await Promise.allSettled([
+    input.signal
+      ? input.structuralAgent.analyze(observation, input.signal)
+      : input.structuralAgent.analyze(observation),
+    input.signal
+      ? input.visualAgent.analyze(observation, input.signal)
+      : input.visualAgent.analyze(observation)
   ]);
-  const structural = SemanticProposalSchema.parse(structuralResult);
-  const visual = SemanticProposalSchema.parse(visualResult);
+  throwIfAborted(input.signal);
+  if (structuralResult.status === "rejected" || visualResult.status === "rejected") {
+    const failures = [["结构分析", structuralResult], ["视觉分析", visualResult]] as const;
+    const failure = new Error(failures.flatMap(([role, result]) => result.status === "rejected"
+      ? [`${role}失败：${describeAnalysisError(result.reason)}`] : []).join("\n"));
+    if (failures.some(([, result]) => result.status === "rejected" && result.reason instanceof Error && result.reason.name === "AbortError")) {
+      failure.name = "AbortError";
+    }
+    throw failure;
+  }
+  const structural = parseProposal(structuralResult.value, "结构分析结果");
+  const visual = parseProposal(visualResult.value, "视觉分析结果");
 
   const conflicts = collectConflicts(structural, visual);
   const adjudicated =
     conflicts.length > 0
-      ? SemanticProposalSchema.parse(
-          await input.adjudicator.adjudicate({ observation, structural, visual })
+      ? parseProposal(
+          await (input.signal
+            ? input.adjudicator.adjudicate({ observation, structural, visual }, input.signal)
+            : input.adjudicator.adjudicate({ observation, structural, visual })),
+          "冲突裁决结果"
         )
       : undefined;
+  throwIfAborted(input.signal);
 
   const selected = adjudicated ?? structural;
   const confidence = adjudicated
@@ -144,6 +94,9 @@ export async function analyzeComponent(input: {
     schemaVersion: SCHEMA_VERSION,
     sourceId: observation.root.sourceId,
     name: observation.root.name,
+    observationFingerprint: createObservationFingerprint(observation),
+    ...(observation.root.componentRef?.assetDependencyHash
+      ? { definitionFingerprint: createDefinitionFingerprint(observation) } : {}),
     proposals: { structural, visual },
     decision: {
       semanticType: selected.semanticType,
@@ -156,6 +109,18 @@ export async function analyzeComponent(input: {
     },
     conflicts
   };
+}
+
+function parseProposal(value: unknown, label: string): SemanticProposal {
+  try { return SemanticProposalSchema.parse(value); }
+  catch (error) { throw new Error(describeAnalysisError(error, label)); }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error("Analysis aborted");
+  error.name = "AbortError";
+  throw error;
 }
 
 function collectConflicts(

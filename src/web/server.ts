@@ -1,9 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createObservationFingerprint, createDefinitionFingerprint, matchesComponentRevision } from "../shared/fingerprint.js";
+import { PageStore, PageError, type PagePlanner } from "../pages/store.js";
+import { createPagePlanner } from "../pages/model.js";
+import { handlePageRequest } from "../pages/http.js";
+import { UsageStore } from "../ai/usage.js";
 
 import { z } from "zod";
 
@@ -50,6 +56,7 @@ interface WorkbenchOptions {
   fixturePath?: string;
   publicDirectory?: string;
   agents?: AgentSet;
+  pagePlanner?: PagePlanner;
   modelFetch?: typeof fetch;
   unityFetch?: typeof fetch;
   model?: {
@@ -59,6 +66,7 @@ interface WorkbenchOptions {
     wireApi?: ModelWireApi;
   };
   modelConfig?: ModelConfigOptions;
+  modelCatalogPath?: string;
 }
 
 export interface WorkbenchServer {
@@ -81,6 +89,7 @@ const WorkbenchStateSchema = z.object({
 type WorkbenchState = z.infer<typeof WorkbenchStateSchema>;
 
 const AnalyzeRequestSchema = z.object({ sourceId: z.string().min(1) });
+const SourceIdRequestSchema = z.object({ sourceId: z.string().min(1) });
 const ApproveRequestSchema = z.object({
   sourceId: z.string().min(1),
   id: z.string().min(1),
@@ -91,9 +100,13 @@ const ApproveRequestSchema = z.object({
 const SearchRequestSchema = z.object({ query: z.string().min(1) });
 const ModelRequestSchema = z.object({
   baseUrl: ModelBaseUrlSchema,
-  apiKey: z.string().min(1),
+  apiKey: z.string().optional(),
   model: z.string().min(1),
   wireApi: z.enum(["chat_completions", "responses"]).optional()
+});
+const ModelCatalogRequestSchema = z.object({
+  baseUrl: ModelBaseUrlSchema,
+  apiKey: z.string().optional()
 });
 const UnitySyncRequestSchema = z.object({
   port: z.number().int().min(1024).max(65535).default(4380),
@@ -101,6 +114,7 @@ const UnitySyncRequestSchema = z.object({
     .string()
     .transform((value) => value.trim())
     .pipe(z.string().min(1).max(200))
+    .optional()
 });
 export async function createWorkbenchServer(
   options: WorkbenchOptions = {}
@@ -108,6 +122,8 @@ export async function createWorkbenchServer(
   const dataDirectory = resolve(options.dataDirectory ?? ".local");
   const fixturePath = resolve(options.fixturePath ?? "fixtures/bridge-components.json");
   const publicDirectory = resolve(options.publicDirectory ?? "public");
+  const usage = new UsageStore(dataDirectory);
+  await usage.initialize();
   const loadedModel = options.model
     ? {
         baseUrl: options.model.baseUrl,
@@ -117,7 +133,13 @@ export async function createWorkbenchServer(
         requiresAuth: true,
         source: "options" as const
       }
-    : await loadModelConfig(options.modelConfig);
+    : await loadModelConfig({
+        ...options.modelConfig,
+        credentialCachePath: options.modelConfig?.credentialCachePath ?? resolve(dataDirectory, "aioa-credential.dpapi")
+      });
+  const usesCodexProvider = loadedModel.source === "codex" || loadedModel.source === "aioa-cache";
+  const modelCatalogPath = options.modelCatalogPath ?? process.env.CODEX_MODEL_CATALOG_JSON ??
+    (usesCodexProvider ? await findLatestCodexModelCatalog() : undefined);
   const agents =
     options.agents ??
     (loadedModel.apiKey || !loadedModel.requiresAuth
@@ -126,11 +148,21 @@ export async function createWorkbenchServer(
           apiKey: loadedModel.apiKey,
           model: loadedModel.model,
           wireApi: loadedModel.wireApi
-        }, options.modelFetch)
+        }, options.modelFetch, usage.recordCall)
       : undefined);
   const runtime = {
     agents,
+    pagePlanner: options.pagePlanner ?? (loadedModel.apiKey || !loadedModel.requiresAuth ? createPagePlanner({
+      baseUrl: loadedModel.baseUrl, apiKey: loadedModel.apiKey, model: loadedModel.model, wireApi: loadedModel.wireApi
+    }, options.modelFetch, usage.recordCall) : undefined),
     modelFetch: options.modelFetch,
+    modelCredentials: {
+      apiKey: loadedModel.apiKey,
+      requiresAuth: loadedModel.requiresAuth,
+      allowCatalogFallback: Boolean(modelCatalogPath) &&
+        (usesCodexProvider || loadedModel.source === "options")
+    },
+    modelCatalogPath,
     unityFetch: options.unityFetch ?? fetch,
     model: {
       ready: agents !== undefined,
@@ -142,11 +174,15 @@ export async function createWorkbenchServer(
   };
   const store = new WorkbenchStore(dataDirectory, fixturePath);
   await store.initialize();
+  const pages = new PageStore(dataDirectory, () => store.readSnapshot());
+  await pages.initialize();
 
   const server = createServer(async (request, response) => {
     try {
       await routeRequest(request, response, {
         store,
+        pages,
+        usage,
         publicDirectory,
         runtime
       });
@@ -154,7 +190,7 @@ export async function createWorkbenchServer(
       const authenticationFailure =
         error instanceof Error && error.message.includes("HTTP 401");
       const status =
-        error instanceof HttpError
+        error instanceof HttpError || error instanceof PageError
           ? error.status
           : authenticationFailure
             ? 502
@@ -162,7 +198,7 @@ export async function createWorkbenchServer(
               ? 400
               : 500;
       const message = authenticationFailure
-        ? "模型服务认证失败，请打开模型设置检查地址、模型和密钥。"
+        ? "模型服务认证失败（HTTP 401）。凭据可能已失效，请从 AIOA 更新一次内置凭据后再双击启动，或在模型设置中填写有效的 API Key。"
         : error instanceof z.ZodError
           ? "Invalid request parameters."
           : error instanceof Error
@@ -201,17 +237,26 @@ async function routeRequest(
   response: ServerResponse,
   context: {
     store: WorkbenchStore;
+    pages: PageStore;
+    usage: UsageStore;
     publicDirectory: string;
       runtime: {
         agents: AgentSet | undefined;
+        pagePlanner: PagePlanner | undefined;
         modelFetch: typeof fetch | undefined;
+        modelCredentials: {
+          apiKey: string;
+          requiresAuth: boolean;
+          allowCatalogFallback: boolean;
+        };
+        modelCatalogPath: string | undefined;
         unityFetch: typeof fetch;
         model: {
         ready: boolean;
         name: string;
         baseUrl: string;
         wireApi: ModelWireApi;
-        source: "browser" | "codex" | "default" | "environment" | "options";
+        source: "browser" | "codex" | "aioa-cache" | "default" | "environment" | "options";
       };
     };
   }
@@ -220,6 +265,16 @@ async function routeRequest(
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
 
   if (method === "POST") assertTrustedMutation(request);
+
+  if (await handlePageRequest(request, response, {
+    pages: context.pages, usage: context.usage, planner: context.runtime.pagePlanner,
+    readBody: () => readJsonBody(request, 16 * 1024 * 1024), send: value => sendJson(response, 200, value)
+  })) return;
+
+  if (method === "GET" && path === "/api/usage") {
+    sendJson(response, 200, context.usage.report());
+    return;
+  }
 
   if (method === "GET" && path === "/api/state") {
     const { observations, drafts, registry } = await context.store.readSnapshot();
@@ -231,17 +286,38 @@ async function routeRequest(
       model: context.runtime.model,
       observations: {
         total: observations.observations.length,
-        items: observations.observations.map((observation) => ({
-          sourceId: observation.root.sourceId,
-          name: observation.root.name,
-          nodeType: observation.root.nodeType,
-          componentRef: observation.root.componentRef,
-          bounds: observation.root.bounds,
-          childCount: countDescendants(observation.root),
-          hasPreview: Boolean(observation.root.imageBase64),
-          draft: draftBySource.get(observation.root.sourceId),
-          approved: approvedBySource.get(observation.root.sourceId)
-        }))
+        items: observations.observations.map((observation) => {
+          const approved = approvedBySource.get(observation.root.sourceId);
+          return {
+            sourceId: observation.root.sourceId,
+            name: observation.root.name,
+            nodeType: observation.root.nodeType,
+            componentRef: observation.root.componentRef,
+            bounds: observation.root.bounds,
+            childCount: countDescendants(observation.root),
+            hasText: hasObservedNode(observation.root, (node) => Boolean(node.text?.characters.trim())),
+            hasImage: hasObservedNode(
+              observation.root,
+              (node) => /IMAGE|SPRITE/i.test(node.nodeType) ||
+                Boolean(node.componentRef?.componentTypes.some((type) => /^(Image|RawImage|SpriteRenderer)$/i.test(type)))
+            ),
+            hasBackgroundFill: Boolean(
+              observation.root.style?.backgroundColor || observation.root.style?.fillType
+            ),
+            opacity: observation.root.opacity,
+            hasPreview: Boolean(observation.root.imageBase64),
+            enginePresence: observation.enginePresence ?? "unknown",
+            lastSeenAt: observation.lastSeenAt,
+            missingSince: observation.missingSince,
+            draft: draftBySource.get(observation.root.sourceId),
+            analysis: context.usage.component(observation.root.sourceId, draftBySource.get(observation.root.sourceId)?.observationFingerprint),
+            approved,
+            approvedChanged: Boolean(
+              approved && (approved.observationFingerprint || approved.definitionFingerprint) &&
+              !matchesComponentRevision(observation, approved)
+            )
+          };
+        })
       },
       registry: { total: registry.components.length, components: registry.components }
     });
@@ -270,8 +346,48 @@ async function routeRequest(
       throw new HttpError(409, "当前进程没有模型密钥，请从 AIOA 会话启动工作台。");
     }
     const input = AnalyzeRequestSchema.parse(await readJsonBody(request));
-    const draft = await context.store.analyze(input.sourceId, context.runtime.agents);
-    sendJson(response, 200, draft);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const closed = () => { if (!response.writableEnded) abort(); };
+    request.once("aborted", abort);
+    response.once("close", closed);
+    try {
+      const { observations } = await context.store.readSnapshot();
+      const observation = observations.observations.find(item => item.root.sourceId === input.sourceId);
+      if (!observation) throw new HttpError(404, "未找到这个组件。");
+      const agents = context.runtime.agents;
+      const draft = await context.usage.track("component_analysis", input.sourceId, observation.root.name,
+        () => context.store.analyze(input.sourceId, agents, controller.signal));
+      if (controller.signal.aborted || response.destroyed) return;
+      sendJson(response, 200, draft);
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) return;
+      throw error;
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", closed);
+    }
+    return;
+  }
+
+  if (method === "POST" && path === "/api/approval/revoke") {
+    const input = SourceIdRequestSchema.parse(await readJsonBody(request));
+    await context.store.revokeApproval(input.sourceId);
+    sendJson(response, 200, { revoked: true, sourceId: input.sourceId });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/approval/reset") {
+    const input = SourceIdRequestSchema.parse(await readJsonBody(request));
+    await context.store.resetReview(input.sourceId);
+    sendJson(response, 200, { reset: true, sourceId: input.sourceId });
+    return;
+  }
+
+  if (method === "POST" && path === "/api/observation/delete") {
+    const input = SourceIdRequestSchema.parse(await readJsonBody(request));
+    await context.store.deleteComponent(input.sourceId);
+    sendJson(response, 200, { deleted: true, sourceId: input.sourceId });
     return;
   }
 
@@ -297,15 +413,53 @@ async function routeRequest(
     return;
   }
 
+  if (method === "POST" && path === "/api/models") {
+    const input = ModelCatalogRequestSchema.parse(await readJsonBody(request));
+    const sameBaseUrl = input.baseUrl === context.runtime.model.baseUrl;
+    const apiKey = input.apiKey?.trim() || (sameBaseUrl ? context.runtime.modelCredentials.apiKey : "");
+    if (!apiKey && context.runtime.modelCredentials.requiresAuth) {
+      throw new HttpError(409, "读取模型列表需要 API Key。当前服务地址不变时可以直接复用已配置的密钥。");
+    }
+    let models: string[];
+    let source: "provider" | "codex-cache" = "provider";
+    try {
+      models = await fetchModelCatalog(
+        context.runtime.modelFetch ?? fetch,
+        input.baseUrl,
+        apiKey
+      );
+    } catch (error) {
+      if (!context.runtime.modelCatalogPath || !sameBaseUrl || input.apiKey?.trim() ||
+        !context.runtime.modelCredentials.allowCatalogFallback) throw error;
+      models = await readCodexModelCatalog(context.runtime.modelCatalogPath);
+      if (!models.length) throw error;
+      source = "codex-cache";
+    }
+    sendJson(response, 200, { models, source });
+    return;
+  }
+
   if (method === "POST" && path === "/api/model") {
     const input = ModelRequestSchema.parse(await readJsonBody(request));
     const wireApi = input.wireApi ?? context.runtime.model.wireApi;
+    const sameBaseUrl = input.baseUrl === context.runtime.model.baseUrl;
+    const apiKey = input.apiKey?.trim() || (sameBaseUrl ? context.runtime.modelCredentials.apiKey : "");
+    const canUseWithoutAuth = sameBaseUrl && !context.runtime.modelCredentials.requiresAuth;
+    if (!apiKey && !canUseWithoutAuth) {
+      throw new HttpError(409, "当前服务需要 API Key；如果只是切换模型，可以复用当前服务地址的已有密钥。");
+    }
     context.runtime.agents = createOpenAICompatibleAgents({
       baseUrl: input.baseUrl,
-      apiKey: input.apiKey,
+      apiKey,
       model: input.model,
       wireApi
-    }, context.runtime.modelFetch);
+    }, context.runtime.modelFetch, context.usage.recordCall);
+    context.runtime.modelCredentials = {
+      apiKey,
+      requiresAuth: !canUseWithoutAuth,
+      allowCatalogFallback: sameBaseUrl && !input.apiKey?.trim() &&
+        context.runtime.modelCredentials.allowCatalogFallback
+    };
     context.runtime.model = {
       ready: true,
       name: input.model,
@@ -313,6 +467,7 @@ async function routeRequest(
       wireApi,
       source: "browser"
     };
+    context.runtime.pagePlanner = createPagePlanner({ baseUrl: input.baseUrl, apiKey, model: input.model, wireApi }, context.runtime.modelFetch, context.usage.recordCall);
     sendJson(response, 200, context.runtime.model);
     return;
   }
@@ -329,7 +484,7 @@ async function routeRequest(
   }
 
   if (method === "POST" && path === "/api/sync") {
-    const imported = adaptBridgeDocument(await readJsonBody(request));
+    const imported = adaptBridgeDocument(await readJsonBody(request, 100 * 1024 * 1024));
     const result = await context.store.syncLibrary(imported);
     sendJson(response, 200, {
       ...result,
@@ -341,11 +496,19 @@ async function routeRequest(
 
   if (method === "POST" && path === "/api/sync/unity") {
     const input = UnitySyncRequestSchema.parse(await readJsonBody(request));
-    const exported = await fetchUnityDocument(
-      context.runtime.unityFetch,
-      input.port,
-      input.objectName
-    );
+    let exported: unknown;
+    try {
+      exported = await fetchUnityDocument(
+        context.runtime.unityFetch,
+        input.port,
+        input.objectName
+      );
+    } catch (error: unknown) {
+      if (error instanceof HttpError && error.status === 404 && input.objectName) {
+        await context.store.markUnityObjectMissing(input.objectName);
+      }
+      throw error;
+    }
     if (
       isRecord(exported) &&
       Object.prototype.hasOwnProperty.call(exported, "port") &&
@@ -379,11 +542,45 @@ async function routeRequest(
     return;
   }
 
+  if (method === "POST" && path === "/api/unity/test") {
+    const input = UnitySyncRequestSchema.parse(await readJsonBody(request));
+    const exported = await fetchUnityDocument(context.runtime.unityFetch, input.port);
+    if (
+      isRecord(exported) &&
+      Object.prototype.hasOwnProperty.call(exported, "port") &&
+      exported.port !== input.port
+    ) {
+      throw new HttpError(502, "Unity 瀵煎嚭鐨勭鍙ｄ笌璇锋眰绔彛涓嶄竴鑷淬€?");
+    }
+    let imported: ObservationDocument;
+    try {
+      imported = adaptBridgeDocument(exported);
+    } catch (error: unknown) {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(502, "Unity 瀵煎嚭涓嶆槸甯﹁妭鐐圭殑 Bridge 0.1.0 鏂囨。銆?");
+    }
+    sendJson(response, 200, {
+      connected: true,
+      port: input.port,
+      components: imported.observations.length
+    });
+    return;
+  }
+
   if (method === "GET") {
     const asset = staticAsset(path);
     if (asset) {
-      const body = await readFile(resolve(context.publicDirectory, asset.file));
-      response.writeHead(200, { "content-type": asset.contentType });
+      let body: Buffer;
+      try {
+        body = await readFile(resolve(context.publicDirectory, asset.file));
+      } catch (error: unknown) {
+        if (isFileNotFound(error)) throw new HttpError(404, "Not found.");
+        throw error;
+      }
+      response.writeHead(200, {
+        "content-type": asset.contentType,
+        "cache-control": "no-store"
+      });
       response.end(body);
       return;
     }
@@ -436,14 +633,28 @@ class WorkbenchStore {
     return (await this.readState()).registry;
   }
 
-  public async analyze(sourceId: string, agents: AgentSet): Promise<SemanticDraft> {
+  public async analyze(
+    sourceId: string,
+    agents: AgentSet,
+    signal?: AbortSignal
+  ): Promise<SemanticDraft> {
     return this.serializeMutation(async () => {
+      if (signal?.aborted) {
+        const error = new Error("Analysis aborted");
+        error.name = "AbortError";
+        throw error;
+      }
       const state = await this.readState();
       const observation = state.observations.observations.find(
         (item) => item.root.sourceId === sourceId
       );
       if (!observation) throw new HttpError(404, "未找到这个组件。");
-      const draft = await analyzeComponent({ observation, ...agents });
+      const draft = await analyzeComponent({ observation, ...agents, signal });
+      if (signal?.aborted) {
+        const error = new Error("Analysis aborted");
+        error.name = "AbortError";
+        throw error;
+      }
       const drafts = state.drafts.drafts.filter((item) => item.sourceId !== sourceId);
       drafts.push(draft);
       await this.writeState({
@@ -464,7 +675,20 @@ class WorkbenchStore {
       if (!draft) {
         throw new HttpError(409, "请先完成 AI 分析，再进行人工批准。");
       }
-      const registry = approveDraft(draft, state.registry, approval);
+      const observation = state.observations.observations.find(
+        (item) => item.root.sourceId === sourceId
+      );
+      if (!observation) throw new HttpError(404, "未找到这个组件。");
+      const currentFingerprint = createObservationFingerprint(observation);
+      if ((draft.observationFingerprint || draft.definitionFingerprint) && !matchesComponentRevision(observation, draft)) {
+        throw new HttpError(409, "组件内容已变化，请重新运行分析后再批准。");
+      }
+      const registry = approveDraft(draft, state.registry, {
+        ...approval,
+        observationFingerprint: currentFingerprint,
+        ...(observation.root.componentRef?.assetDependencyHash
+          ? { definitionFingerprint: createDefinitionFingerprint(observation) } : {})
+      });
       await this.writeState({ ...state, registry });
       return registry;
     });
@@ -477,6 +701,70 @@ class WorkbenchStore {
         observations,
         drafts: { schemaVersion: SCHEMA_VERSION, drafts: [] },
         registry: { schemaVersion: SCHEMA_VERSION, components: [] }
+      });
+    });
+  }
+
+  public async revokeApproval(sourceId: string): Promise<void> {
+    await this.serializeMutation(async () => {
+      const state = await this.readState();
+      const hasApproval = state.registry.components.some((entry) => entry.sourceId === sourceId);
+      if (!hasApproval) throw new HttpError(404, "这个组件没有已批准结论。");
+      await this.writeState({
+        ...state,
+        registry: {
+          ...state.registry,
+          components: state.registry.components.filter((entry) => entry.sourceId !== sourceId)
+        }
+      });
+    });
+  }
+
+  public async resetReview(sourceId: string): Promise<void> {
+    await this.serializeMutation(async () => {
+      const state = await this.readState();
+      const exists =
+        state.observations.observations.some((item) => item.root.sourceId === sourceId) ||
+        state.drafts.drafts.some((item) => item.sourceId === sourceId) ||
+        state.registry.components.some((entry) => entry.sourceId === sourceId);
+      if (!exists) throw new HttpError(404, "未找到这个组件。");
+      await this.writeState({
+        ...state,
+        drafts: {
+          ...state.drafts,
+          drafts: state.drafts.drafts.filter((item) => item.sourceId !== sourceId)
+        },
+        registry: {
+          ...state.registry,
+          components: state.registry.components.filter((entry) => entry.sourceId !== sourceId)
+        }
+      });
+    });
+  }
+
+  public async deleteComponent(sourceId: string): Promise<void> {
+    await this.serializeMutation(async () => {
+      const state = await this.readState();
+      const exists = state.observations.observations.some((item) => item.root.sourceId === sourceId) ||
+        state.drafts.drafts.some((item) => item.sourceId === sourceId) ||
+        state.registry.components.some((entry) => entry.sourceId === sourceId);
+      if (!exists) throw new HttpError(404, "未找到这个组件。");
+      await this.writeState({
+        ...state,
+        observations: {
+          ...state.observations,
+          observations: state.observations.observations.filter(
+            (item) => item.root.sourceId !== sourceId
+          )
+        },
+        drafts: {
+          ...state.drafts,
+          drafts: state.drafts.drafts.filter((item) => item.sourceId !== sourceId)
+        },
+        registry: {
+          ...state.registry,
+          components: state.registry.components.filter((entry) => entry.sourceId !== sourceId)
+        }
       });
     });
   }
@@ -494,8 +782,17 @@ class WorkbenchStore {
         seen.add(prefabGuid);
       }
       const state = await this.readState();
+      const observedAt = new Date().toISOString();
       const replacements = new Map(
-        incoming.observations.map((observation) => [observation.root.sourceId, observation])
+        incoming.observations.map((observation) => [
+          observation.root.sourceId,
+          {
+            ...observation,
+            enginePresence: "present" as const,
+            lastSeenAt: observedAt,
+            missingSince: undefined
+          }
+        ])
       );
       let updated = 0;
       const merged = state.observations.observations.map((observation) => {
@@ -514,6 +811,33 @@ class WorkbenchStore {
         }
       });
       return { updated, added: added.length };
+    });
+  }
+
+  public async markUnityObjectMissing(objectName: string): Promise<number> {
+    return this.serializeMutation(async () => {
+      const state = await this.readState();
+      const missingSince = new Date().toISOString();
+      let changed = 0;
+      const observations = state.observations.observations.map((observation) => {
+        if (observation.root.name !== objectName) return observation;
+        if (observation.enginePresence === "missing") return observation;
+        changed += 1;
+        return {
+          ...observation,
+          enginePresence: "missing" as const,
+          missingSince: observation.missingSince ?? missingSince
+        };
+      });
+      if (changed === 0) return 0;
+      await this.writeState({
+        ...state,
+        observations: {
+          ...state.observations,
+          observations
+        }
+      });
+      return changed;
     });
   }
 
@@ -560,18 +884,109 @@ class HttpError extends Error {
   }
 }
 
+async function fetchModelCatalog(
+  fetchImpl: typeof fetch,
+  baseUrl: string,
+  apiKey: string
+): Promise<string[]> {
+  let response: Response;
+  try {
+    response = await withTimeout(
+      Promise.resolve(fetchImpl(`${baseUrl.replace(/\/$/, "")}/models`, {
+        method: "GET",
+        ...(apiKey ? { headers: { authorization: `Bearer ${apiKey}` } } : {})
+      })),
+      15_000,
+      () => new HttpError(504, "读取模型列表超时，请检查服务地址。")
+    );
+  } catch (error: unknown) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(502, "无法连接模型服务，请检查服务地址。 ");
+  }
+
+  if (response.status === 401) {
+    throw new Error("模型列表请求失败 HTTP 401");
+  }
+  if (response.status === 404) {
+    throw new HttpError(502, "当前模型服务没有提供 /models 模型列表接口。");
+  }
+  if (!response.ok) {
+    throw new HttpError(502, `读取模型列表失败（HTTP ${response.status}）。`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new HttpError(502, "模型服务返回的模型列表不是有效 JSON。");
+  }
+  const entries = Array.isArray(body)
+    ? body
+    : isRecord(body) && Array.isArray(body.data)
+      ? body.data
+      : isRecord(body) && Array.isArray(body.models)
+        ? body.models
+        : undefined;
+  if (!entries) throw new HttpError(502, "模型服务返回的模型列表格式无法识别。");
+
+  return [...new Set(entries
+    .map((entry) => typeof entry === "string" ? entry : isRecord(entry) && typeof entry.id === "string" ? entry.id : "")
+    .map((id) => id.trim())
+    .filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+async function findLatestCodexModelCatalog(): Promise<string | undefined> {
+  const root = tmpdir();
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  const candidates: Array<{ path: string; modified: number }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^aioa-codex-models-/i.test(entry.name)) continue;
+    const path = resolve(root, entry.name, "models.json");
+    try {
+      const details = await stat(path);
+      candidates.push({ path, modified: details.mtimeMs });
+    } catch {
+      // A catalog can disappear while the host is refreshing it.
+    }
+  }
+  return candidates.sort((left, right) => right.modified - left.modified)[0]?.path;
+}
+
+async function readCodexModelCatalog(path: string): Promise<string[]> {
+  let body: unknown;
+  try {
+    body = JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch {
+    return [];
+  }
+  if (!isRecord(body) || !Array.isArray(body.models)) return [];
+  return [...new Set(body.models
+    .filter((model): model is Record<string, unknown> => isRecord(model))
+    .filter((model) => model.visibility !== "hidden" && model.supported_in_api !== false)
+    .map((model) => typeof model.slug === "string" ? model.slug : typeof model.id === "string" ? model.id : "")
+    .map((id) => id.trim())
+    .filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
 async function fetchUnityDocument(
   unityFetch: typeof fetch,
   port: number,
-  objectName: string
+  objectName?: string
 ): Promise<unknown> {
-  const url = `http://127.0.0.1:${port}/export?objectName=${encodeURIComponent(objectName)}`;
+  const url = objectName
+    ? `http://127.0.0.1:${port}/export?objectName=${encodeURIComponent(objectName)}`
+    : `http://127.0.0.1:${port}/export`;
   let response: Response;
   try {
     response = await withTimeout(
       Promise.resolve(unityFetch(url)),
-      30_000,
-      () => new HttpError(504, "导出超时，请核对端口。")
+      objectName ? 30_000 : 120_000,
+      () => new HttpError(504, objectName ? "导出超时，请核对端口。" : "批量导出超时，请检查 Unity 状态和端口。")
     );
   } catch (error: unknown) {
     if (error instanceof HttpError) throw error;
@@ -579,9 +994,11 @@ async function fetchUnityDocument(
   }
 
   if (response.status === 404) {
+    if (!objectName) throw new HttpError(404, "已加载场景中没有可同步的 Prefab 组件。");
     throw new HttpError(404, `找不到名为“${objectName}”的物体。`);
   }
   if (response.status === 409) {
+    if (!objectName) throw new HttpError(409, "Unity 场景中有重复的 Prefab GUID，无法确定要同步哪个实例。");
     throw new HttpError(409, "有多个同名物体，要求名称唯一。");
   }
   if (response.status === 503) {
@@ -603,6 +1020,9 @@ async function fetchUnityDocument(
   }
   if (errorCode === "target_name_ambiguous") {
     throw new HttpError(409, "有多个同名物体，要求名称唯一。");
+  }
+  if (errorCode === "target_name_required") {
+    throw new HttpError(502, "当前 Unity Bridge 不支持自动导出，请更新 Bridge 后重试。");
   }
   if (response.status >= 400) {
     throw new HttpError(502, `Unity 导出失败（HTTP ${response.status}）。`);
@@ -628,22 +1048,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isFileNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
 function staticAsset(path: string): { file: string; contentType: string } | undefined {
   const assets: Record<string, { file: string; contentType: string }> = {
     "/": { file: "index.html", contentType: "text/html; charset=utf-8" },
     "/app.js": { file: "app.js", contentType: "text/javascript; charset=utf-8" },
-    "/styles.css": { file: "styles.css", contentType: "text/css; charset=utf-8" }
+    "/library-view.js": { file: "library-view.js", contentType: "text/javascript; charset=utf-8" },
+    "/page-planner.js": { file: "page-planner.js", contentType: "text/javascript; charset=utf-8" },
+    "/page-editor.js": { file: "page-editor.js", contentType: "text/javascript; charset=utf-8" },
+    "/lucide.js": { file: "../node_modules/lucide/dist/umd/lucide.js", contentType: "text/javascript; charset=utf-8" },
+    "/styles.css": { file: "styles.css", contentType: "text/css; charset=utf-8" },
+    "/usage-view.js": { file: "usage-view.js", contentType: "text/javascript; charset=utf-8" },
+    "/usage-dashboard.js": { file: "usage-dashboard.js", contentType: "text/javascript; charset=utf-8" }
   };
-  return assets[path];
+  if (assets[path]) return assets[path];
+
+  // Keep newly added browser modules available without another server route edit.
+  // Only serve a single safe filename from the public directory; API/data files
+  // and traversal paths must continue to fall through to the 404 handler.
+  if (!/^\/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|css|html)$/.test(path)) return undefined;
+  const extension = extname(path).toLowerCase();
+  const contentType = extension === ".js"
+    ? "text/javascript; charset=utf-8"
+    : extension === ".css"
+      ? "text/css; charset=utf-8"
+      : "text/html; charset=utf-8";
+  return { file: path.slice(1), contentType };
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+async function readJsonBody(request: IncomingMessage, maxBytes = 20 * 1024 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 20 * 1024 * 1024) throw new HttpError(413, "请求内容过大。");
+    if (size > maxBytes) throw new HttpError(413, "请求内容过大。");
     chunks.push(buffer);
   }
   try {
@@ -711,10 +1153,15 @@ function decodePathSegment(value: string): string {
 }
 
 function countDescendants(node: ObservedNode): number {
-  return node.children.reduce(
+  // The package declaration widens children; stored Observations are schema-validated.
+  return (node.children as ObservedNode[]).reduce(
     (total, child) => total + 1 + countDescendants(child),
     0
   );
+}
+
+function hasObservedNode(node: ObservedNode, predicate: (node: ObservedNode) => boolean): boolean {
+  return predicate(node) || (node.children as ObservedNode[]).some((child) => hasObservedNode(child, predicate));
 }
 
 function assertTrustedMutation(request: IncomingMessage): void {

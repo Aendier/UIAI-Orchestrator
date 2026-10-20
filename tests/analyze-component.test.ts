@@ -8,6 +8,8 @@ import {
   type SemanticProposal
 } from "../src/semantic/index.js";
 import { createOpenAICompatibleAgents } from "../src/ai/openai-compatible.js";
+import { createObservationFingerprint, createDefinitionFingerprint } from '../src/shared/fingerprint.js';
+import { approveDraft, type ComponentRegistry } from '../src/registry/index.js';
 
 const observation: ComponentObservation = {
   schemaVersion: "1.0.0",
@@ -50,6 +52,71 @@ const agreedProposal: SemanticProposal = {
 };
 
 describe("analyzeComponent", () => {
+  it('binds both web and CLI analysis/approval to the observed definition without inventing legacy revisions', async () => {
+    const modern = structuredClone(observation);
+    modern.root.componentRef!.assetDependencyHash = '123456789abcdef0123456789abcdef0';
+    const agent: AnalysisAgent = {analyze: vi.fn().mockResolvedValue(agreedProposal)};
+    const analyze = (input: ComponentObservation) => analyzeComponent({observation: input, structuralAgent: agent,
+      visualAgent: agent, adjudicator: {adjudicate: vi.fn()}});
+    const draft = await analyze(modern);
+    expect(draft.observationFingerprint).toBe(createObservationFingerprint(modern));
+    expect(draft.definitionFingerprint).toEqual(createDefinitionFingerprint(modern));
+    const approved = approveDraft(draft, {schemaVersion: '1.0.0', components: []}, {id: 'button.reward.claim', approvedBy: 'tester'});
+    expect(approved.components[0]!.observationFingerprint).toBe(draft.observationFingerprint);
+    expect(approved.components[0]!.definitionFingerprint).toEqual(draft.definitionFingerprint);
+    expect((await analyze(observation)).definitionFingerprint).toBeUndefined();
+  });
+
+  it("keeps same-semantic size variants as independent Registry entries", () => {
+    const draft = (sourceId: string, name: string) => ({
+      schemaVersion: "1.0.0" as const,
+      sourceId,
+      name,
+      proposals: { structural: agreedProposal, visual: agreedProposal },
+      decision: { ...agreedProposal, status: "draft" as const },
+      conflicts: []
+    });
+    let registry: ComponentRegistry = { schemaVersion: "1.0.0", components: [] };
+    for (const [sourceId, name] of [
+      ["guid-primary-s", "UI_Com_Common_Button_Primary_S"],
+      ["guid-primary-m", "UI_Com_Common_Button_Primary_M"],
+      ["guid-primary-l", "UI_Com_Common_Button_Primary_L"]
+    ] as const) {
+      registry = approveDraft(draft(sourceId, name), registry, {
+        id: "button.primary",
+        approvedBy: "tester"
+      });
+    }
+
+    expect(registry.components.map((entry) => entry.id)).toEqual([
+      "button.primary.s",
+      "button.primary.m",
+      "button.primary.l"
+    ]);
+    expect(registry.components.map((entry) => entry.sourceId)).toEqual([
+      "guid-primary-s",
+      "guid-primary-m",
+      "guid-primary-l"
+    ]);
+
+    registry = approveDraft(draft("guid-primary-m", "UI_Com_Common_Button_Primary_M"), registry, {
+      id: "button.primary",
+      approvedBy: "tester"
+    });
+    expect(registry.components).toHaveLength(3);
+    expect(registry.components.find((entry) => entry.sourceId === "guid-primary-m")?.id)
+      .toBe("button.primary.m");
+
+    let legacy = approveDraft(draft("guid-legacy", "PrimaryButton"), {
+      schemaVersion: "1.0.0",
+      components: []
+    }, { id: "button.primary", approvedBy: "tester" });
+    legacy = approveDraft(draft("guid-legacy", "UI_Com_Common_Button_Primary_S"), legacy, {
+      id: "button.primary",
+      approvedBy: "tester"
+    });
+    expect(legacy.components[0]?.id).toBe("button.primary");
+  });
   it("produces a draft without adjudication when independent agents agree", async () => {
     const structuralAgent: AnalysisAgent = {
       analyze: vi.fn().mockResolvedValue(agreedProposal)

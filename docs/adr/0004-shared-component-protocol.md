@@ -4,6 +4,10 @@
 
 Accepted
 
+Protocol ownership and publication are superseded by ADR 0009. The single-agent
+workflow and existing component contract remain valid. This application now consumes
+the fixed package; its original protocol entry remains a compatibility reexport.
+
 ## Context
 
 Cross-repository work was previously routed through a Manager, workers, and coordination plans. That machinery is not how the component feature should be implemented. Other repositories still need the same observation, semantic draft, and approved-component data structures.

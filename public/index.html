@@ -16,41 +16,127 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <button id="model-status" class="status-pill" type="button">检查模型中</button>
-        <label class="button secondary" for="import-file">导入 JSON</label>
-        <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <button id="settings-button" class="button secondary settings-trigger" type="button">设置</button>
       </div>
     </header>
 
-    <main class="workspace">
+    <nav class="workspace-tabs" role="tablist" aria-label="工作区">
+      <button id="library-tab" role="tab" aria-selected="true" aria-controls="library-workspace">组件库</button>
+      <button id="pages-tab" role="tab" aria-selected="false" aria-controls="pages-workspace">页面规划</button>
+    </nav>
+    <main id="library-workspace" class="workspace" role="tabpanel" aria-labelledby="library-tab">
       <aside class="sidebar" aria-label="组件列表">
         <div class="sidebar-head">
           <div>
             <h2>组件库</h2>
             <p id="component-count">正在加载</p>
           </div>
-          <input id="component-filter" class="compact-input" type="search" placeholder="筛选组件" />
-          <form id="unity-sync-form" class="unity-sync-form">
+          <div class="library-actions" aria-label="组件库操作">
+            <button id="unity-auto-sync-button" class="button primary" type="button">重新导出并同步</button>
+            <button id="import-json-button" class="button secondary" type="button">导入 JSON</button>
+            <input id="import-file" type="file" accept="application/json,.json" hidden />
+          </div>
+          <details class="import-help">
+            <summary>导入 JSON 的用途</summary>
+            <p>离线导入 Unity Bridge 导出的组件结构和截图，替换整个组件库并清空旧分析草稿及审核记录。日常更新用“重新导出并同步”；已有导出文件时，可在设置的 Unity 连接页使用“同步导出文件”保留审核结果。这里不导入页面计划 JSON。</p>
+          </details>
+          <input id="component-filter" class="compact-input" type="search" aria-label="搜索组件" placeholder="名称 / Source ID / Prefab 路径" />
+          <div class="library-controls" aria-label="组件筛选和排序">
             <label>
-              Unity 对象名
-              <input id="unity-object-name" required maxlength="200" placeholder="RewardClaimButton" />
+              状态
+              <select id="component-status-filter">
+                <option value="">全部状态</option>
+                <option value="approved">已批准</option>
+                <option value="changed">已批准但内容已变化</option>
+                <option value="draft">待审核</option>
+                <option value="observed">未分析</option>
+              </select>
             </label>
-            <div class="unity-sync-row">
-              <label>
-                端口
-                <input id="unity-port" type="number" min="1024" max="65535" step="1" value="4380" required />
-              </label>
-              <button class="button primary" type="submit">从本机 Unity 拉取</button>
-            </div>
-          </form>
+            <label>
+              语义类型
+              <select id="component-type-filter">
+                <option value="">全部类型</option>
+              </select>
+            </label>
+            <label>
+              排序
+              <select id="component-sort">
+                <option value="name-asc">名称 A-Z</option>
+                <option value="name-desc">名称 Z-A</option>
+                <option value="type-asc">类型</option>
+              </select>
+            </label>
+            <label class="presence-filter">
+              引擎状态
+              <select id="component-presence-filter">
+                <option value="">全部引擎状态</option>
+                <option value="present">存在</option>
+                <option value="missing">已删除</option>
+                <option value="unknown">未检查</option>
+              </select>
+            </label>
+          </div>
+          <button id="selection-notice" class="selection-notice" type="button" hidden>当前组件不在本页 · 定位</button>
         </div>
-        <div id="component-list" class="component-list"></div>
+        <div class="library-lanes">
+          <section class="component-group" aria-labelledby="approved-heading">
+            <div class="group-heading">
+              <div class="group-title">
+                <h3 id="approved-heading">已审核</h3>
+                <span id="approved-count" class="group-count">0</span>
+              </div>
+              <div class="group-pagination">
+                <button class="page-button" type="button" data-page-target="approved" data-page-action="previous" aria-label="上一页" title="上一页">‹</button>
+                <span id="approved-page-status" class="page-status">0 / 0</span>
+                <button class="page-button" type="button" data-page-target="approved" data-page-action="next" aria-label="下一页" title="下一页">›</button>
+              </div>
+              <div class="group-tools">
+                <span id="approved-analysis-progress" class="analysis-progress-summary" aria-live="polite" hidden></span>
+                <button id="approved-analysis-cancel" class="group-tool cancel-analysis" type="button" data-analysis-cancel hidden>停止分析</button>
+                <button class="group-tool" type="button" data-batch-toggle="approved" aria-pressed="false">批处理</button>
+              </div>
+            </div>
+            <div id="approved-batch-toolbar" class="batch-toolbar" hidden>
+              <span>已选择 <strong data-selected-count>0</strong> 项</span>
+              <button class="batch-action analyze" type="button" data-batch-action="analyze" data-batch-target="approved">分析</button>
+              <button class="batch-action reset" type="button" data-batch-action="reset" data-batch-target="approved">重置为未审核</button>
+              <button class="batch-action delete" type="button" data-batch-action="delete" data-batch-target="approved">删除</button>
+            </div>
+            <div id="approved-list" class="component-list" aria-live="polite"></div>
+          </section>
+          <section class="component-group" aria-labelledby="unapproved-heading">
+            <div class="group-heading">
+              <div class="group-title">
+                <h3 id="unapproved-heading">未审核</h3>
+                <span id="unapproved-count" class="group-count">0</span>
+              </div>
+              <div class="group-pagination">
+                <button class="page-button" type="button" data-page-target="unapproved" data-page-action="previous" aria-label="上一页" title="上一页">‹</button>
+                <span id="unapproved-page-status" class="page-status">0 / 0</span>
+                <button class="page-button" type="button" data-page-target="unapproved" data-page-action="next" aria-label="下一页" title="下一页">›</button>
+              </div>
+              <div class="group-tools">
+                <button class="group-tool" type="button" data-quick-review="unapproved">一键分析本页</button>
+                <span id="unapproved-analysis-progress" class="analysis-progress-summary" aria-live="polite" hidden></span>
+                <button id="unapproved-analysis-cancel" class="group-tool cancel-analysis" type="button" data-analysis-cancel hidden>停止分析</button>
+                <button class="group-tool" type="button" data-batch-toggle="unapproved" aria-pressed="false">批处理</button>
+              </div>
+            </div>
+            <div id="unapproved-batch-toolbar" class="batch-toolbar" hidden>
+              <span>已选择 <strong data-selected-count>0</strong> 项</span>
+              <button class="batch-action analyze" type="button" data-batch-action="analyze" data-batch-target="unapproved">分析</button>
+              <button class="batch-action reset" type="button" data-batch-action="reset" data-batch-target="unapproved">重置为未审核</button>
+              <button class="batch-action delete" type="button" data-batch-action="delete" data-batch-target="unapproved">删除</button>
+            </div>
+            <div id="unapproved-list" class="component-list" aria-live="polite"></div>
+          </section>
+        </div>
       </aside>
 
       <section class="content">
         <div class="search-band">
           <form id="search-form" class="search-form">
-            <label for="search-query">搜索 Approved Registry</label>
+            <label for="search-query">搜索 Approved Registry <span class="help-tip" tabindex="0" title="只搜索已批准的 Registry。系统会识别语义类型、角色和能力关键词，也会匹配用途、视觉特征和组件名称；结果分数达到 60% 才会显示。" aria-label="搜索规则说明">?</span></label>
             <div class="search-row">
               <input
                 id="search-query"
@@ -84,6 +170,9 @@
             <dl id="facts-list" class="facts-list"></dl>
             <div class="action-strip">
               <button id="analyze-button" class="button primary" type="button">运行多 Agent 分析</button>
+              <button id="refresh-unity-button" class="button secondary" type="button">从 Unity 更新此组件</button>
+              <button id="revoke-approval-button" class="button secondary" type="button" hidden>撤销审核</button>
+              <button id="delete-component-button" class="button danger-ghost" type="button">删除组件</button>
               <span id="analysis-note" class="muted"></span>
             </div>
           </section>
@@ -94,34 +183,42 @@
                 <p class="eyebrow">HUMAN REVIEW</p>
                 <h2>语义审核</h2>
               </div>
+              <div class="registry-id-inline">
+                <div class="field-label">Registry ID <span class="help-tip" tabindex="0" title="系统生成的稳定组件标识，用于搜索、复用和追踪版本；审核时不需要手动修改。" aria-label="Registry ID 说明">?</span></div>
+                <code id="registry-id" class="registry-id-display" role="status"></code>
+              </div>
             </div>
+            <div id="analysis-error" class="analysis-failure" role="alert" hidden></div>
+            <div id="component-usage" class="component-usage"></div>
             <div id="draft-empty" class="review-empty">
               <p>运行分析后，这里会展示结构 Agent、视觉 Agent 和裁决结果。</p>
             </div>
             <div id="draft-content" hidden>
               <div id="decision-summary" class="decision-summary"></div>
+              <p id="decision-summary-text" class="decision-summary-text"></p>
+              <div class="confidence-heading">
+                <h3>判断置信度</h3>
+                <span class="help-tip" tabindex="0" title="百分比表示模型对这一项判断的可信程度，范围是 0 到 100%，不是通过概率，也不是搜索匹配分数。" aria-label="置信度说明">?</span>
+              </div>
+              <p class="confidence-note">数值越高，表示模型越确定；较低的数值需要人工重点核对。</p>
               <div id="confidence-bars" class="confidence-bars"></div>
               <div class="evidence-section">
-                <h3>证据</h3>
+                <h3>判断证据 <span class="help-tip" tabindex="0" title="证据来自 Unity 导出的结构、样式和截图，只说明模型依据了什么，不等于最终结论。" aria-label="判断证据说明">?</span></h3>
                 <div id="evidence-list" class="evidence-list"></div>
               </div>
               <form id="approve-form" class="approve-form">
                 <div class="field-row">
-                  <label>
-                    Registry ID
-                    <input id="registry-id" required placeholder="button.reward.claim" />
-                  </label>
                   <label>
                     审核人
                     <input id="reviewer" required value="本地审核员" />
                   </label>
                 </div>
                 <label>
-                  用途（逗号分隔）
-                  <input id="use-cases" placeholder="领取奖励, claim reward" />
+                  <span class="field-label">用途（逗号分隔） <span class="help-tip" tabindex="0" title="系统会根据语义角色和结构自动填充建议。请检查是否客观、稳定；多个用途用逗号分隔，不写临时页面文案。" aria-label="用途说明">?</span></span>
+                  <input id="use-cases" placeholder="领取奖励, 展示价格" />
                 </label>
                 <label>
-                  视觉特征（逗号分隔）
+                  <span class="field-label">视觉特征（逗号分隔） <span class="help-tip" tabindex="0" title="系统会根据导出的尺寸、文本、图像、填充和子节点自动填充建议。请只保留可观察且稳定的特征，不写主观评价。" aria-label="视觉特征说明">?</span></span>
                   <input id="visual-traits" placeholder="宽按钮, 主操作" />
                 </label>
                 <button class="button approve" type="submit">人工批准并加入 Registry</button>
@@ -132,39 +229,259 @@
       </section>
     </main>
 
+    <main id="pages-workspace" class="page-workspace" role="tabpanel" aria-labelledby="pages-tab" hidden>
+      <aside class="page-sidebar">
+        <div class="page-section-title"><h2>页面任务</h2><button id="page-refresh" class="page-icon" title="刷新页面任务" aria-label="刷新页面任务"><i data-lucide="refresh-cw"></i></button></div>
+        <div id="page-list" class="page-task-list"></div>
+        <form id="page-create-form" class="page-create-form">
+          <h3>新建页面</h3>
+          <p class="page-create-help">上传一张效果图，补充页面要求后开始生成结构草稿。</p>
+          <label>上传参考图<input id="page-reference-file" type="file" accept="image/png,image/jpeg" required /></label>
+          <label>画板名称<input id="page-name" value="新页面" maxlength="200" required /></label>
+          <div class="page-field-pair"><label>宽<input id="page-width" type="number" min="1" max="100000" required /></label><label>高<input id="page-height" type="number" min="1" max="100000" required /></label></div>
+          <label>页面要求（可选）<textarea id="page-instructions" rows="3" maxlength="20000" placeholder="例如：顶部保留返回按钮，列表区域使用现有奖励组件"></textarea></label>
+          <button class="button primary" type="submit"><i data-lucide="plus"></i>创建页面</button>
+        </form>
+      </aside>
+      <section class="page-main">
+        <header class="page-toolbar">
+          <div><h2 id="page-title">页面规划</h2><span id="page-state" class="muted"></span></div>
+          <div class="page-commands">
+            <button id="page-analyze" class="button secondary" disabled><i data-lucide="scan-eye"></i>生成页面结构</button>
+            <button id="page-cancel" class="page-icon" hidden title="取消模型请求" aria-label="取消模型请求"><i data-lucide="square"></i></button>
+            <button id="page-save" class="page-icon" disabled title="保存修订" aria-label="保存修订"><i data-lucide="save"></i></button>
+            <button id="page-approve" class="button approve" disabled><i data-lucide="check"></i><span id="page-approve-label">批准结构</span></button>
+            <button id="page-download" class="page-icon" disabled title="下载执行计划" aria-label="下载执行计划"><i data-lucide="download"></i></button>
+          </div>
+        </header>
+        <div id="page-approval-hint" class="page-message muted" role="status" aria-live="polite"></div>
+        <div id="page-message" class="page-message" role="status" aria-live="polite"></div>
+        <section id="page-empty-state" class="page-empty-state">
+          <div class="page-empty-icon"><i data-lucide="layout-template"></i></div>
+          <p class="page-empty-eyebrow">页面规划工作流</p>
+          <h3>从一张参考图开始</h3>
+          <p class="page-empty-copy">先在左侧创建页面，系统会把参考图转换成可审核的页面结构。你可以在批准前调整文字、布局、组件和缺口。</p>
+          <ol class="page-empty-steps">
+            <li><strong>创建页面</strong><span>上传参考图，补充画板尺寸和文字要求</span></li>
+            <li><strong>生成结构</strong><span>分析参考图，得到页面结构草稿</span></li>
+            <li><strong>审核并导出</strong><span>处理待确认项，批准后下载计划 JSON</span></li>
+          </ol>
+        </section>
+        <div id="page-review" class="page-review" hidden>
+          <div class="page-evidence-column">
+            <section id="page-overview" class="page-overview" aria-label="页面概览">
+              <div class="page-overview-head">
+                <div><p class="page-overview-eyebrow">当前页面</p><h3 id="page-overview-title">页面结构审核</h3></div>
+                <label class="page-reviewer-field">审核人<input id="page-reviewer" value="本地审核员" required /></label>
+              </div>
+              <div class="page-summary-grid">
+                <div class="page-summary-card"><span>状态</span><strong id="page-summary-status">—</strong><small id="page-summary-revision">—</small></div>
+                <div class="page-summary-card"><span>待处理</span><strong id="page-summary-pending">0</strong><small id="page-summary-blocking">无阻塞项</small></div>
+                <div class="page-summary-card"><span>结构节点</span><strong id="page-summary-nodes">0</strong><small id="page-summary-matches">0 个可复用组件</small></div>
+                <div class="page-summary-card"><span>审核进度</span><strong id="page-summary-progress">0%</strong><small id="page-summary-progress-label">等待处理</small></div>
+              </div>
+              <div class="page-progress" aria-label="审核进度"><span id="page-progress-fill"></span></div>
+              <p id="page-summary-message" class="page-summary-message"></p>
+            </section>
+            <section class="page-reference-section">
+              <div class="page-section-title"><h3>参考证据</h3><span id="page-reference-size" class="muted"></span></div>
+              <div class="page-reference-stage"><div class="page-reference-image"><img id="page-reference-preview" alt="页面参考图" /><div id="page-reference-region" hidden></div></div></div>
+              <p id="page-requirements" class="page-wrapping muted"></p>
+            </section>
+            <section class="page-tree-section">
+              <div class="page-section-title"><div><h3>页面结构</h3><p class="page-section-help">按层级查看和调整页面元素</p></div><div class="page-tree-tools">
+                <select id="page-add-kind" aria-label="新增节点类型"><option value="container">容器</option><option value="text">文本</option><option value="placeholder">缺口占位</option></select>
+                <button id="page-add-node" class="page-icon" title="在所选容器中添加" aria-label="在所选容器中添加"><i data-lucide="plus"></i></button>
+                <button id="page-node-up" class="page-icon" title="绘制顺序前移" aria-label="绘制顺序前移"><i data-lucide="arrow-up"></i></button>
+                <button id="page-node-down" class="page-icon" title="绘制顺序后移" aria-label="绘制顺序后移"><i data-lucide="arrow-down"></i></button>
+                <button id="page-delete-node" class="page-icon" title="删除节点" aria-label="删除节点"><i data-lucide="trash-2"></i></button>
+              </div></div>
+              <div id="page-tree" class="page-tree" role="tree" aria-label="页面结构"></div>
+            </section>
+            <section class="page-issues-section"><div class="page-section-title"><div><h3>需要你确认</h3><p class="page-section-help">每项都要选择处理方式并填写依据</p></div><span id="page-issue-count" class="muted"></span></div><div id="page-issue-summary" class="page-issue-summary"></div><div id="page-issues"></div></section>
+          </div>
+          <aside class="page-properties">
+            <details class="page-panel" open><summary><span>选中元素</span><code id="page-node-kind"></code></summary><form id="page-node-form">
+              <label>名称<input id="page-node-name" required maxlength="200" /></label>
+              <label>父容器<select id="page-node-parent"></select></label>
+              <div class="page-field-pair"><label>X<input id="page-node-x" type="number" step="any" /></label><label>Y<input id="page-node-y" type="number" step="any" /></label></div>
+              <div class="page-field-pair"><label>宽<input id="page-node-width" type="number" min="0.01" step="any" /></label><label>高<input id="page-node-height" type="number" min="0.01" step="any" /></label></div>
+              <label id="page-text-field" hidden>文字<textarea id="page-node-text" rows="3"></textarea></label>
+              <label id="page-font-field" hidden>字号<input id="page-node-font" type="number" min="1" step="any" /></label>
+              <button class="button secondary" type="submit"><i data-lucide="check"></i>应用属性</button>
+            </form></details>
+            <details class="page-panel" open><summary>可复用组件</summary><section class="page-match-section">
+              <select id="page-component-choice" aria-label="选择审核组件"></select>
+              <div id="page-component-preview" class="page-component-preview"></div>
+              <button id="page-replace-component" class="button secondary"><i data-lucide="replace"></i>使用所选组件</button>
+              <button id="page-gap-component" class="button secondary"><i data-lucide="square-dashed"></i>保留缺口</button>
+              <div id="page-match-evidence" class="page-wrapping muted"></div>
+            </section></details>
+            <details class="page-panel"><summary>图片素材</summary><section class="page-assets-section"><p class="page-section-help">上传页面中需要保留的普通图片，不会替换参考图证据。</p><input id="page-asset-file" type="file" accept="image/png,image/jpeg" aria-label="上传图片素材" /><select id="page-asset-choice" aria-label="素材选择"></select><button id="page-use-asset" class="button secondary"><i data-lucide="image"></i>应用图片素材</button></section></details>
+            <details class="page-panel"><summary>局部调整</summary><section class="page-revise-section"><p class="page-section-help">选中普通元素后，让模型只提出这一部分的修改。</p><textarea id="page-revise-instructions" rows="3" aria-label="局部调整要求"></textarea><button id="page-revise" class="button secondary"><i data-lucide="wand-sparkles"></i>提出调整</button><div id="page-proposal" hidden></div></section></details>
+            <details><summary>修订与审核记录</summary><div id="page-history"></div></details>
+            <details><summary>高级：结构 JSON</summary><p class="page-section-help">供需要检查协议数据时使用，日常审核无需打开。</p><textarea id="page-json-editor" rows="12" aria-label="结构 JSON"></textarea><button id="page-apply-json" class="button secondary">应用 JSON 编辑</button></details>
+          </aside>
+        </div>
+      </section>
+    </main>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <dialog id="model-dialog" class="model-dialog">
-      <form id="model-form" method="dialog">
+    <dialog id="settings-dialog" class="settings-dialog">
+      <div class="settings-shell">
         <div class="dialog-heading">
           <div>
-            <p class="eyebrow">OPENAI-COMPATIBLE</p>
-            <h2>模型设置</h2>
+            <p class="eyebrow">WORKBENCH CONTROL</p>
+            <h2>设置</h2>
           </div>
-          <button id="close-model-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
+          <button id="close-settings-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
-        <label>
-          服务地址
-          <input id="model-base-url" type="url" required value="https://api.openai.com/v1" />
-        </label>
-        <label>
-          模型
-          <input id="model-name" required value="gpt-4.1-mini" />
-        </label>
-        <label>
-          协议
-          <select id="model-wire-api" required>
-            <option value="responses">Responses API</option>
-            <option value="chat_completions">Chat Completions</option>
-          </select>
-        </label>
-        <label>
-          API Key
-          <input id="model-api-key" type="password" required autocomplete="off" />
-        </label>
-        <p class="security-note">密钥仅保留在当前本地服务内存中，关闭服务后失效。</p>
-        <button class="button primary" type="submit">应用设置</button>
-      </form>
+        <div class="settings-body">
+          <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+            <button id="settings-tab-unity" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-unity">Unity 连接</button>
+            <button id="settings-tab-model" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-model">模型</button>
+            <button id="settings-tab-usage" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-usage">Token 消耗</button>
+            <button id="settings-tab-theme" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-theme">配色</button>
+          </nav>
+          <div class="settings-content">
+            <section id="settings-panel-unity" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-unity" hidden>
+              <div class="settings-intro">
+                <h3>Unity 连接</h3>
+                <p>工作台会通过 Unity Bridge 重新导出当前已加载场景，再把结果同步到组件库。</p>
+              </div>
+              <label class="connection-field">
+                Bridge 端口
+                <span class="connection-control-row">
+                  <input id="unity-port" type="number" min="1024" max="65535" step="1" value="4380" required />
+                  <button id="unity-test-button" class="button secondary" type="button">测试连接</button>
+                </span>
+              </label>
+              <p id="unity-test-status" class="settings-note" role="status" aria-live="polite"></p>
+              <button id="sync-file-button" class="button secondary" type="button">同步导出文件</button>
+              <input id="sync-file" type="file" accept="application/json,.json" hidden />
+            </section>
+            <section id="settings-panel-model" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-model" hidden>
+              <form id="model-form" class="model-settings-form">
+                <div class="settings-intro">
+                  <h3>模型配置</h3>
+                  <p>模型凭据只在当前本地服务进程内使用，不会写入工作台数据文件。</p>
+                </div>
+                <div id="model-status" class="status-pill">检查模型中</div>
+                <label>
+                  服务地址
+                  <input id="model-base-url" type="url" required value="https://api.openai.com/v1" />
+                </label>
+                <label>
+                  模型
+                  <span class="model-choice-row">
+                    <select id="model-name" required aria-describedby="model-catalog-status"></select>
+                    <button id="model-refresh" class="button secondary" type="button">读取模型</button>
+                  </span>
+                </label>
+                <p id="model-catalog-status" class="settings-note" role="status">打开模型设置后读取当前服务的可用模型。</p>
+                <label id="model-custom-label" hidden>
+                  手动输入模型名
+                  <input id="model-name-custom" autocomplete="off" placeholder="服务未提供模型列表时使用" />
+                </label>
+                <label>
+                  协议
+                  <select id="model-wire-api" required>
+                    <option value="responses">Responses API</option>
+                    <option value="chat_completions">Chat Completions</option>
+                  </select>
+                </label>
+                <label>
+                  API Key
+                  <input id="model-api-key" type="password" autocomplete="off" />
+                </label>
+                <p class="security-note">密钥只保留在当前本地服务内存中；地址不变时，切换模型不需要重复填写。</p>
+                <button class="button primary" type="submit">应用模型设置</button>
+              </form>
+            </section>
+            <section id="settings-panel-usage" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-usage" hidden>
+              <div class="usage-heading">
+                <div class="settings-intro"><h3>Token 记录</h3><p>组件与页面分析的模型消耗</p></div>
+                <div class="usage-toolbar"><label class="usage-period-label">统计范围<select id="usage-period" aria-label="统计范围"><option value="30">最近 30 天</option><option value="7">最近 7 天</option><option value="all">全部记录</option></select></label><button id="usage-refresh" class="button secondary" type="button">刷新</button></div>
+              </div>
+              <div class="usage-filters">
+                <label>查找<input id="usage-search" type="search" placeholder="组件 / 页面 / 模型 / ID" /></label>
+                <label>任务<select id="usage-kind"><option value="">全部任务</option><option value="component_analysis">组件分析</option><option value="page_analysis">页面分析</option><option value="page_revision">局部修改</option></select></label>
+                <label>结果<select id="usage-status"><option value="">全部结果</option><option value="succeeded">成功</option><option value="failed">失败</option><option value="cancelled">已停止</option><option value="running">进行中</option></select></label>
+              </div>
+              <p id="usage-range" class="usage-note"></p>
+              <div class="usage-dashboard">
+                <div id="usage-totals" class="usage-summary"></div>
+                <div class="usage-chart-grid">
+                  <section class="usage-chart-panel"><div class="usage-panel-heading"><h4>每日趋势</h4><span>总 token</span></div><div id="usage-trend"></div></section>
+                  <section class="usage-chart-panel"><div class="usage-panel-heading"><h4>消耗构成</h4><span>输入 / 输出 / 缓存</span></div><div id="usage-composition"></div></section>
+                  <section class="usage-chart-panel"><div class="usage-panel-heading"><h4>后端分布</h4><span>按模型服务</span></div><div id="usage-backends"></div></section>
+                  <section class="usage-chart-panel"><div class="usage-panel-heading"><h4>模型分布</h4><span>按总量排序</span></div><div id="usage-models"></div></section>
+                </div>
+                <section class="usage-chart-panel usage-daily-panel"><div class="usage-panel-heading"><h4>每日明细</h4><span>仅显示有已报告用量的日期</span></div><div id="usage-daily"></div></section>
+              </div>
+              <section id="usage-records" class="usage-records">
+                <div class="usage-panel-heading"><h4>调用记录</h4><button id="usage-clear-date" class="usage-link" type="button" hidden>清除日期</button></div>
+                <p id="usage-count" class="usage-note"></p>
+                <div id="usage-operations" class="usage-operations"></div>
+                <button id="usage-more" class="button secondary" type="button" hidden>显示更多记录</button>
+              </section>
+              <details class="usage-method"><summary>统计口径与记录范围</summary><p class="usage-note">从功能启用后的调用开始记录，历史消耗无法补算。只统计模型服务返回的用量；未提供的显示“未提供”，不是零。缓存读属于输入，推理属于输出，不重复计入总量。构成图无法拆分的用量单独标记。后端按请求的服务主机分组，旧记录显示未知来源。所有日期按本地时间、调用开始日归属；星号表示部分调用未报告对应指标。</p></details>
+              <p id="usage-message" class="usage-note" role="status" aria-live="polite"></p>
+            </section>
+            <section id="settings-panel-theme" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-theme">
+              <div class="settings-intro">
+                <h3>界面配色</h3>
+                <p>颜色会立即应用，并保存在当前浏览器。选择相近的底色和文字色可以保持清晰度。</p>
+              </div>
+              <div class="theme-grid">
+                <label class="theme-color-field">
+                  页面背景
+                  <span class="theme-color-control"><input id="theme-bg" data-theme-key="bg" type="color" value="#0f1724" /><code id="theme-bg-value">#0F1724</code></span>
+                </label>
+                <label class="theme-color-field">
+                  面板背景
+                  <span class="theme-color-control"><input id="theme-surface" data-theme-key="surface" type="color" value="#111827" /><code id="theme-surface-value">#111827</code></span>
+                </label>
+                <label class="theme-color-field">
+                  控件背景
+                  <span class="theme-color-control"><input id="theme-surface-raised" data-theme-key="surfaceRaised" type="color" value="#1b2334" /><code id="theme-surface-raised-value">#1B2334</code></span>
+                </label>
+                <label class="theme-color-field">
+                  选中背景
+                  <span class="theme-color-control"><input id="theme-surface-active" data-theme-key="surfaceActive" type="color" value="#253149" /><code id="theme-surface-active-value">#253149</code></span>
+                </label>
+                <label class="theme-color-field">
+                  主要文字
+                  <span class="theme-color-control"><input id="theme-ink" data-theme-key="ink" type="color" value="#f0f5ff" /><code id="theme-ink-value">#F0F5FF</code></span>
+                </label>
+                <label class="theme-color-field">
+                  辅助文字
+                  <span class="theme-color-control"><input id="theme-muted" data-theme-key="muted" type="color" value="#91a6c5" /><code id="theme-muted-value">#91A6C5</code></span>
+                </label>
+                <label class="theme-color-field">
+                  边框线
+                  <span class="theme-color-control"><input id="theme-line" data-theme-key="line" type="color" value="#35445b" /><code id="theme-line-value">#35445B</code></span>
+                </label>
+                <label class="theme-color-field">
+                  强调色
+                  <span class="theme-color-control"><input id="theme-accent" data-theme-key="accent" type="color" value="#739eff" /><code id="theme-accent-value">#739EFF</code></span>
+                </label>
+                <label class="theme-color-field">
+                  强调悬停
+                  <span class="theme-color-control"><input id="theme-accent-strong" data-theme-key="accentStrong" type="color" value="#98b8ff" /><code id="theme-accent-strong-value">#98B8FF</code></span>
+                </label>
+              </div>
+              <div class="settings-actions">
+                <span class="settings-note">提示：高对比度颜色更适合长时间审核。</span>
+                <button id="reset-theme" class="button secondary" type="button">恢复默认配色</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
     </dialog>
+    <script src="/lucide.js"></script>
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/page-planner.js"></script>
   </body>
 </html>
